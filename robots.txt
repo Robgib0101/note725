@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://robgib0101.github.io/note725/sitemap.xml
