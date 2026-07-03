@@ -13,15 +13,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="google-adsense-account" content="ca-pub-6925363929827743">
+  <meta name="theme-color" content="#2f7d68">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Really Notepad">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Really Notepad | 자동 저장 메모장과 기록 가이드</title>
   <meta name="description" content="Really Notepad는 브라우저에서 바로 쓰는 자동 저장 메모장입니다. 태그, 이미지 메모, 체크리스트, 템플릿과 함께 기록을 오래 유지하는 방법을 제공합니다.">
   <link rel="canonical" href="https://robgib0101.github.io/note725/">
+  <link rel="manifest" href="manifest.webmanifest">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Really Notepad | 자동 저장 메모장과 기록 가이드">
   <meta property="og:description" content="Really Notepad는 브라우저에서 바로 쓰는 자동 저장 메모장입니다. 태그, 이미지 메모, 체크리스트, 템플릿과 함께 기록을 오래 유지하는 방법을 제공합니다.">
   <meta property="og:url" content="https://robgib0101.github.io/note725/">
   <meta property="og:image" content="https://robgib0101.github.io/note725/assets/productivity-workspace.png">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=desktop-windows-2">
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6925363929827743"
      crossorigin="anonymous"></script>
   <script type="application/ld+json">{
@@ -55,7 +60,7 @@
   </header>
 
   <section class="app-shell" id="appShell" aria-label="자동 저장 메모장">
-    <aside class="sidebar" aria-label="메모 목록">
+    <aside class="sidebar" aria-label="메모 목록" data-window="notes" data-window-title="메모 목록">
       <header class="sidebar-header">
         <div>
           <p class="eyebrow">Private notes</p>
@@ -80,7 +85,7 @@
     </aside>
 
     <section class="editor" aria-label="메모 편집기">
-      <section class="editor-toolbar" aria-label="메모 작업">
+      <section class="editor-toolbar" aria-label="메모 작업" data-window="status" data-window-title="메모 작업">
         <div class="current-meta">
           <span id="currentDate">오늘</span>
           <span id="wordCount">0자</span>
@@ -97,20 +102,76 @@
         </div>
       </section>
 
-      <section class="writing-tools" aria-label="작성 도구">
-        <div class="writing-tool-stack">
-          <div class="tool-group">
-            <button class="format-button" type="button" data-action="heading" title="제목 삽입">H</button>
-            <button class="format-button" type="button" data-action="bold" title="굵게">B</button>
-            <button class="format-button" type="button" data-action="bullet" title="글머리 목록">•</button>
-            <button class="format-button" type="button" data-action="numbered" title="번호 목록">1.</button>
-            <button class="format-button" type="button" data-action="check" title="체크리스트">☐</button>
-            <button class="format-button" type="button" data-action="quote" title="인용">“</button>
-            <button class="format-button" type="button" data-action="date" title="날짜 삽입">날짜</button>
+      <div class="editor-workspace">
+        <section class="note-paper" aria-label="메모 작성 영역" data-window="paper" data-window-title="메모 보드">
+          <div class="note-paper-header">
+            <label class="note-title-field" for="titleInput">
+              <span class="note-field-label">제목</span>
+              <input id="titleInput" class="title-input" type="text" maxlength="80" placeholder="제목 없음">
+            </label>
+
+            <label class="tag-wrap" for="tagInput">
+              <span class="note-field-label">태그</span>
+              <input id="tagInput" type="text" placeholder="업무, 아이디어, 회의">
+            </label>
           </div>
-          <div class="image-tool-group">
-            <label class="template-wrap" for="imageLayoutSelect">
+
+          <section class="memo-canvas-wrap" aria-label="자유 메모 보드 영역">
+            <div id="memoCanvas" class="memo-canvas" aria-label="텍스트와 이미지를 자유롭게 배치하는 메모 보드"></div>
+            <label class="visually-hidden" for="contentInput">메모 내용 백업</label>
+            <textarea id="contentInput" class="content-input content-backing" aria-hidden="true" tabindex="-1"></textarea>
+          </section>
+
+          <div id="canvasContextMenu" class="canvas-context-menu" data-window="settings" data-window-title="설정 창" data-window-floating="true" hidden>
+            <div class="context-menu-group" data-context-group="theme">
+              <span>테마</span>
+              <button type="button" data-context-action="theme" data-context-value="plain">기본</button>
+              <button type="button" data-context-action="theme" data-context-value="paper">종이</button>
+              <button type="button" data-context-action="theme" data-context-value="marker">마커</button>
+              <button type="button" data-context-action="theme" data-context-value="dark">다크</button>
+            </div>
+            <div class="context-menu-group" data-context-group="crop">
               <span>이미지</span>
+              <button type="button" data-context-action="crop" data-context-value="original">원본</button>
+              <button type="button" data-context-action="crop" data-context-value="square">정사각</button>
+              <button type="button" data-context-action="crop" data-context-value="wide">와이드</button>
+              <button type="button" data-context-action="crop" data-context-value="circle">원형</button>
+            </div>
+            <div class="context-menu-group">
+              <button type="button" data-context-action="front">앞으로</button>
+              <button type="button" data-context-action="back">뒤로</button>
+              <button type="button" data-context-action="delete">삭제</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="writing-tools" aria-label="작성 도구" data-window="tools" data-window-title="도구 패널">
+          <div class="tool-section">
+            <span class="tool-section-title">서식</span>
+            <div class="tool-grid tool-grid-format">
+              <button class="format-button" type="button" data-action="heading" title="제목 삽입">H</button>
+              <button class="format-button" type="button" data-action="bold" title="굵게">B</button>
+              <button class="format-button" type="button" data-action="bullet" title="글머리 목록">•</button>
+              <button class="format-button" type="button" data-action="numbered" title="번호 목록">1.</button>
+              <button class="format-button" type="button" data-action="check" title="체크리스트">☐</button>
+              <button class="format-button" type="button" data-action="quote" title="인용">“</button>
+            </div>
+          </div>
+
+          <div class="tool-section">
+            <span class="tool-section-title">삽입</span>
+            <div class="tool-grid tool-grid-insert">
+              <button id="addTextButton" class="format-button format-button-wide" type="button" title="텍스트 블록 추가">텍스트</button>
+              <button class="format-button" type="button" data-action="date" title="날짜 삽입">날짜</button>
+              <button id="importTextButton" class="format-button format-button-wide" type="button" title="텍스트 파일 불러오기">TXT</button>
+              <input id="textInput" class="visually-hidden" type="file" accept=".txt,.md,.markdown,text/plain,text/markdown">
+            </div>
+          </div>
+
+          <div class="tool-section">
+            <span class="tool-section-title">이미지</span>
+            <label class="template-wrap" for="imageLayoutSelect">
+              <span>배치</span>
               <select id="imageLayoutSelect">
                 <option value="inline">본문형</option>
                 <option value="caption">캡션형</option>
@@ -131,32 +192,24 @@
             <button id="addImageButton" class="tool-button" type="button">이미지 추가</button>
             <input id="imageInput" class="visually-hidden" type="file" accept="image/*" multiple>
           </div>
-        </div>
-        <label class="template-wrap" for="templateSelect">
-          <span>템플릿</span>
-          <select id="templateSelect">
-            <option value="">선택</option>
-            <option value="daily">오늘 기록</option>
-            <option value="meeting">회의록</option>
-            <option value="idea">아이디어</option>
-            <option value="tasks">작업 목록</option>
-          </select>
-        </label>
-      </section>
 
-      <label class="visually-hidden" for="titleInput">메모 제목</label>
-      <input id="titleInput" class="title-input" type="text" maxlength="80" placeholder="제목 없음">
-
-      <label class="tag-wrap" for="tagInput">
-        <span>#</span>
-        <input id="tagInput" type="text" placeholder="태그: 업무, 아이디어, 회의">
-      </label>
-
-      <section class="image-board" id="imageBoard" aria-label="이미지 메모 블록" hidden></section>
-
-      <label class="visually-hidden" for="contentInput">메모 내용</label>
-      <textarea id="contentInput" class="content-input" placeholder="생각을 적어보세요. 입력하면 자동 저장됩니다."></textarea>
+          <div class="tool-section">
+            <span class="tool-section-title">템플릿</span>
+            <label class="template-wrap template-wrap-compact" for="templateSelect">
+              <span>종류</span>
+              <select id="templateSelect">
+                <option value="">선택</option>
+                <option value="daily">오늘 기록</option>
+                <option value="meeting">회의록</option>
+                <option value="idea">아이디어</option>
+                <option value="tasks">작업 목록</option>
+              </select>
+            </label>
+          </div>
+        </section>
+      </div>
     </section>
+    <div class="window-dock" id="windowDock" aria-label="창 복원"></div>
   </section>
 
   <main id="content" class="site-content">
@@ -244,6 +297,13 @@
       <a href="contact.html">문의</a>
     </nav>
   </footer>
-  <script type="module" src="main.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js?v=desktop-windows-2", { scope: "./" }).catch(() => {});
+      });
+    }
+  </script>
+  <script type="module" src="main.js?v=desktop-windows-2"></script>
 </body>
 </html>

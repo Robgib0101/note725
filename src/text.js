@@ -14,18 +14,39 @@ export function formatDate(value) {
   }).format(new Date(value));
 }
 
+function getCanvasText(note) {
+  return (note.canvasItems ?? [])
+    .filter((item) => item.type === "text")
+    .map((item) => item.text ?? "")
+    .join("\n\n");
+}
+
+function getCanvasImageCount(note) {
+  return (note.canvasItems ?? [])
+    .filter((item) => item.type === "image")
+    .reduce((total, item) => total + (item.images?.length ?? 1), 0);
+}
+
 export function getTitle(note) {
-  return note.title.trim() || note.content.trim().split("\n")[0] || "제목 없음";
+  const content = note.content || getCanvasText(note);
+
+  return note.title.trim() || content.trim().split("\n")[0] || "제목 없음";
 }
 
 export function getPreview(note) {
-  const preview = note.content.replace(/\s+/g, " ").trim();
+  const content = note.content || getCanvasText(note);
+  const preview = content.replace(/\s+/g, " ").trim();
 
   return preview || "내용 없음";
 }
 
 export function getSearchText(note) {
-  return [note.title, note.content, ...(note.tags ?? [])].join(" ").toLowerCase();
+  const canvasText = getCanvasText(note);
+  const canvasCaptions = (note.canvasItems ?? [])
+    .map((item) => [item.caption, item.note].filter(Boolean).join(" "))
+    .join(" ");
+
+  return [note.title, note.content, canvasText, canvasCaptions, ...(note.tags ?? [])].join(" ").toLowerCase();
 }
 
 export function parseTags(value) {
@@ -36,6 +57,12 @@ export function parseTags(value) {
 }
 
 export function getImageCount(note) {
+  const canvasImageCount = getCanvasImageCount(note ?? {});
+
+  if (canvasImageCount > 0) {
+    return canvasImageCount;
+  }
+
   return note?.images?.reduce((total, block) => total + (block.images?.length ?? 1), 0) ?? 0;
 }
 

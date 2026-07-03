@@ -19,10 +19,16 @@ export const elements = {
   imageStyleSelect: document.querySelector("#imageStyleSelect"),
   addImageButton: document.querySelector("#addImageButton"),
   imageInput: document.querySelector("#imageInput"),
+  addTextButton: document.querySelector("#addTextButton"),
+  importTextButton: document.querySelector("#importTextButton"),
+  textInput: document.querySelector("#textInput"),
   templateSelect: document.querySelector("#templateSelect"),
   titleInput: document.querySelector("#titleInput"),
   tagInput: document.querySelector("#tagInput"),
-  imageBoard: document.querySelector("#imageBoard"),
+  memoCanvas: document.querySelector("#memoCanvas"),
+  canvasContextMenu: document.querySelector("#canvasContextMenu"),
+  windowDock: document.querySelector("#windowDock"),
+  imageBoard: document.querySelector("#memoCanvas"),
   contentInput: document.querySelector("#contentInput"),
   template: document.querySelector("#noteItemTemplate")
 };

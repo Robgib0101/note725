@@ -1,0 +1,40 @@
+{
+  "name": "Really Notepad",
+  "short_name": "Notepad",
+  "description": "브라우저에서 바로 쓰는 자동 저장 메모장과 기록 습관 가이드입니다.",
+  "lang": "ko-KR",
+  "dir": "ltr",
+  "start_url": "/note725/",
+  "scope": "/note725/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#dfe7e4",
+  "theme_color": "#2f7d68",
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
+  "screenshots": [
+    {
+      "src": "/note725/assets/productivity-workspace.png",
+      "sizes": "1536x864",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Really Notepad workspace"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "새 메모 작성",
+      "short_name": "새 메모",
+      "description": "Really Notepad 메모장을 바로 엽니다.",
+      "url": "/note725/#appShell"
+    },
+    {
+      "name": "작성 가이드",
+      "short_name": "가이드",
+      "description": "메모 작성 가이드를 엽니다.",
+      "url": "/note725/guide.html"
+    }
+  ]
+}
