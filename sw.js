@@ -1,4 +1,4 @@
-const CACHE_NAME = "really-notepad-download-export-v4";
+const CACHE_NAME = "really-notepad-launcher-system-v5";
 const BASE_PATH = new URL("./", self.location).pathname;
 
 const CORE_ASSETS = [

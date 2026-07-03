@@ -664,12 +664,12 @@ function createCanvasItemTitlebar(item, element) {
 
 
 const MINI_APPS = {
-  tools: { title: "도구 패널", x: 92, y: 82, width: 300 },
-  images: { title: "이미지 보관함", x: 124, y: 112, width: 340 },
-  templates: { title: "템플릿", x: 154, y: 142, width: 300 },
-  files: { title: "파일", x: 184, y: 172, width: 310 },
-  stickers: { title: "스티커", x: 214, y: 202, width: 300 },
-  settings: { title: "설정", x: 244, y: 232, width: 320 }
+  tools: { title: "도구 패널", y: 92, width: 300 },
+  images: { title: "이미지 보관함", y: 120, width: 340 },
+  templates: { title: "템플릿", y: 148, width: 300 },
+  files: { title: "파일", y: 176, width: 310 },
+  stickers: { title: "스티커", y: 204, width: 300 },
+  settings: { title: "설정", y: 232, width: 320 }
 };
 
 function getMiniWindow(appId) {
@@ -678,6 +678,41 @@ function getMiniWindow(appId) {
 
 function bringMiniWindowToFront(windowElement) {
   windowElement.style.zIndex = String(++miniWindowZ);
+}
+
+function getMiniAppButton(appId) {
+  return document.querySelector(`[data-open-app="${CSS.escape(appId)}"]`);
+}
+
+function updateMiniAppButtonState(appId) {
+  const button = getMiniAppButton(appId);
+  const windowElement = getMiniWindow(appId);
+
+  if (!button) {
+    return;
+  }
+
+  const isVisible = Boolean(windowElement && !windowElement.hidden);
+  const isMinimized = windowElement?.dataset.windowState === "minimized";
+  button.classList.toggle("is-open", isVisible);
+  button.classList.toggle("is-minimized", !isVisible && isMinimized);
+  button.setAttribute("aria-pressed", String(button.classList.contains("is-selected") || isVisible));
+}
+
+function setMiniWindowVisibility(windowElement, state) {
+  windowElement.dataset.windowState = state;
+  windowElement.hidden = state !== "open";
+  updateMiniAppButtonState(windowElement.dataset.miniWindow);
+}
+
+function getMiniWindowPosition(config) {
+  const shellWidth = elements.appShell?.clientWidth || 1180;
+  const launcherWidth = document.querySelector(".app-launcher")?.offsetWidth || 70;
+  const gutter = shellWidth > 760 ? launcherWidth + 28 : 12;
+  const x = clamp(shellWidth - config.width - gutter, 18, Math.max(18, shellWidth - config.width - 18));
+  const y = clamp(config.y, 18, Math.max(18, (elements.appShell?.clientHeight || 720) - 230));
+
+  return { x, y };
 }
 
 function createMiniWindowButton(action, label, symbol) {
@@ -751,12 +786,14 @@ function createMiniWindow(appId) {
   }
 
   const windowElement = document.createElement("section");
+  const position = getMiniWindowPosition(config);
   windowElement.className = "mini-app-window";
   windowElement.dataset.miniWindow = appId;
-  windowElement.dataset.windowX = String(config.x);
-  windowElement.dataset.windowY = String(config.y);
-  windowElement.style.left = config.x + "px";
-  windowElement.style.top = config.y + "px";
+  windowElement.dataset.windowState = "closed";
+  windowElement.dataset.windowX = String(position.x);
+  windowElement.dataset.windowY = String(position.y);
+  windowElement.style.left = position.x + "px";
+  windowElement.style.top = position.y + "px";
   windowElement.style.width = config.width + "px";
   windowElement.hidden = true;
   windowElement.setAttribute("aria-label", config.title);
@@ -775,11 +812,15 @@ function createMiniWindow(appId) {
 
   const controls = document.createElement("span");
   controls.className = "mini-window-controls";
+  const minimizeButton = createMiniWindowButton("minimize", "최소화", "−");
+  minimizeButton.addEventListener("click", () => {
+    setMiniWindowVisibility(windowElement, "minimized");
+  });
   const closeButton = createMiniWindowButton("close", "닫기", "×");
   closeButton.addEventListener("click", () => {
-    windowElement.hidden = true;
+    setMiniWindowVisibility(windowElement, "closed");
   });
-  controls.append(closeButton);
+  controls.append(minimizeButton, closeButton);
   titlebar.append(title, controls);
 
   const body = document.createElement("div");
@@ -803,7 +844,7 @@ function openMiniApp(appId) {
   }
 
   renderMiniApp(appId, windowElement.querySelector(".mini-window-body"));
-  windowElement.hidden = false;
+  setMiniWindowVisibility(windowElement, "open");
   bringMiniWindowToFront(windowElement);
 }
 
@@ -943,8 +984,9 @@ function focusCanvasItem(itemId) {
 function setupMiniApps() {
   document.querySelectorAll("[data-open-app]").forEach((button) => {
     button.addEventListener("click", () => {
-      document.querySelectorAll(".app-icon.is-selected").forEach((item) => item.classList.remove("is-selected"));
+      document.querySelectorAll(".app-icon").forEach((item) => item.classList.remove("is-selected"));
       button.classList.add("is-selected");
+      document.querySelectorAll("[data-open-app]").forEach((item) => updateMiniAppButtonState(item.dataset.openApp));
     });
     button.addEventListener("dblclick", () => openMiniApp(button.dataset.openApp));
     button.addEventListener("keydown", (event) => {

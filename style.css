@@ -2048,66 +2048,127 @@ h1 {
 
 
 /* Mini app launcher layer */
-.app-shell {
-  overflow: visible;
-}
-
 .app-launcher {
   position: absolute;
-  top: 86px;
-  right: -74px;
+  top: 78px;
+  right: 14px;
   z-index: 85;
   display: grid;
-  gap: 10px;
-  width: 62px;
-  padding: 8px;
-  background: rgba(251, 252, 250, 0.78);
-  border: 1px solid rgba(47, 125, 104, 0.2);
+  gap: 7px;
+  width: 66px;
+  padding: 7px;
+  background: rgba(242, 248, 245, 0.9);
+  border: 1px solid rgba(47, 125, 104, 0.22);
   border-radius: 8px;
-  box-shadow: 0 14px 30px rgba(23, 42, 38, 0.14);
-  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 34px rgba(23, 42, 38, 0.16);
+  backdrop-filter: blur(14px);
 }
 
 .app-icon {
+  position: relative;
   display: grid;
   justify-items: center;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
-  min-height: 54px;
-  padding: 6px 4px;
+  min-height: 56px;
+  padding: 6px 3px 5px;
   color: var(--accent-strong);
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(47, 125, 104, 0.18);
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 900;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 820;
   line-height: 1.1;
 }
 
 .app-icon:hover,
 .app-icon.is-selected {
-  color: #fff;
+  color: var(--accent-strong);
+  background: #fff;
+  border-color: rgba(47, 125, 104, 0.28);
+  box-shadow: 0 7px 18px rgba(23, 42, 38, 0.1);
+}
+
+.app-icon.is-open::before,
+.app-icon.is-minimized::before {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
   background: var(--accent);
-  border-color: var(--accent);
+  border: 2px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(47, 125, 104, 0.26);
+  content: "";
+}
+
+.app-icon.is-minimized::before {
+  background: #8aa39b;
+}
+
+.app-icon::after {
+  position: absolute;
+  right: calc(100% + 9px);
+  top: 50%;
+  z-index: 2;
+  min-width: max-content;
+  padding: 6px 8px;
+  color: #fff;
+  background: rgba(31, 37, 35, 0.92);
+  border-radius: 6px;
+  box-shadow: 0 8px 18px rgba(23, 42, 38, 0.18);
+  content: attr(data-tooltip);
+  font-size: 12px;
+  font-weight: 760;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(4px, -50%);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.app-icon:hover::after {
+  opacity: 1;
+  transform: translate(0, -50%);
 }
 
 .app-icon-glyph {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   place-items: center;
   color: inherit;
-  background: rgba(219, 236, 230, 0.76);
-  border: 1px solid rgba(47, 125, 104, 0.18);
+  background: rgba(219, 236, 230, 0.72);
+  border: 1px solid rgba(47, 125, 104, 0.16);
   border-radius: 7px;
-  font-size: 11px;
-  font-weight: 950;
+}
+
+.app-icon-glyph svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .app-icon:hover .app-icon-glyph,
-.app-icon.is-selected .app-icon-glyph {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.34);
+.app-icon.is-selected .app-icon-glyph,
+.app-icon.is-open .app-icon-glyph {
+  background: rgba(47, 125, 104, 0.12);
+  border-color: rgba(47, 125, 104, 0.28);
+}
+
+.app-icon-label {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: #46645d;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  letter-spacing: 0;
 }
 
 .mini-window-layer {
@@ -2125,10 +2186,10 @@ h1 {
   max-height: min(70vh, 620px);
   overflow: hidden;
   color: var(--ink);
-  background: rgba(251, 252, 250, 0.96);
-  border: 1px solid rgba(47, 125, 104, 0.28);
+  background: rgba(251, 252, 250, 0.98);
+  border: 1px solid rgba(47, 125, 104, 0.3);
   border-radius: 8px;
-  box-shadow: 0 22px 54px rgba(23, 42, 38, 0.2);
+  box-shadow: 0 22px 54px rgba(23, 42, 38, 0.22);
   pointer-events: auto;
 }
 
@@ -2164,6 +2225,7 @@ h1 {
 
 .mini-window-controls {
   display: flex;
+  gap: 5px;
   margin-left: auto;
 }
 
@@ -2184,6 +2246,11 @@ h1 {
 
 .mini-window-control:hover {
   color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.mini-window-control--close:hover {
   background: var(--danger);
   border-color: var(--danger);
 }
@@ -2293,13 +2360,6 @@ h1 {
   content: "";
 }
 
-@media (max-width: 1340px) {
-  .app-launcher {
-    right: 12px;
-    top: 74px;
-  }
-}
-
 @media (max-width: 760px) {
   .app-shell {
     overflow: hidden;
@@ -2316,6 +2376,10 @@ h1 {
     padding: 6px;
   }
 
+  .app-icon::after {
+    display: none;
+  }
+
   .app-icon {
     min-height: 48px;
     font-size: 10px;
@@ -2324,7 +2388,11 @@ h1 {
   .app-icon-glyph {
     width: 24px;
     height: 24px;
-    font-size: 10px;
+  }
+
+  .app-icon-glyph svg {
+    width: 18px;
+    height: 18px;
   }
 
   .mini-app-window {
