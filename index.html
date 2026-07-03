@@ -26,7 +26,7 @@
   <meta property="og:description" content="Really Notepad는 브라우저에서 바로 쓰는 자동 저장 메모장입니다. 태그, 이미지 메모, 체크리스트, 템플릿과 함께 기록을 오래 유지하는 방법을 제공합니다.">
   <meta property="og:url" content="https://robgib0101.github.io/note725/">
   <meta property="og:image" content="https://robgib0101.github.io/note725/assets/productivity-workspace.png">
-  <link rel="stylesheet" href="style.css?v=desktop-windows-2">
+  <link rel="stylesheet" href="style.css?v=mini-apps-1">
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6925363929827743"
      crossorigin="anonymous"></script>
   <script type="application/ld+json">{
@@ -60,7 +60,7 @@
   </header>
 
   <section class="app-shell" id="appShell" aria-label="자동 저장 메모장">
-    <aside class="sidebar" aria-label="메모 목록" data-window="notes" data-window-title="메모 목록">
+    <aside class="sidebar" aria-label="메모 목록">
       <header class="sidebar-header">
         <div>
           <p class="eyebrow">Private notes</p>
@@ -85,7 +85,7 @@
     </aside>
 
     <section class="editor" aria-label="메모 편집기">
-      <section class="editor-toolbar" aria-label="메모 작업" data-window="status" data-window-title="메모 작업">
+      <section class="editor-toolbar" aria-label="메모 작업">
         <div class="current-meta">
           <span id="currentDate">오늘</span>
           <span id="wordCount">0자</span>
@@ -103,7 +103,7 @@
       </section>
 
       <div class="editor-workspace">
-        <section class="note-paper" aria-label="메모 작성 영역" data-window="paper" data-window-title="메모 보드">
+        <section class="note-paper" aria-label="메모 작성 영역">
           <div class="note-paper-header">
             <label class="note-title-field" for="titleInput">
               <span class="note-field-label">제목</span>
@@ -122,7 +122,7 @@
             <textarea id="contentInput" class="content-input content-backing" aria-hidden="true" tabindex="-1"></textarea>
           </section>
 
-          <div id="canvasContextMenu" class="canvas-context-menu" data-window="settings" data-window-title="설정 창" data-window-floating="true" hidden>
+          <div id="canvasContextMenu" class="canvas-context-menu" hidden>
             <div class="context-menu-group" data-context-group="theme">
               <span>테마</span>
               <button type="button" data-context-action="theme" data-context-value="plain">기본</button>
@@ -145,7 +145,7 @@
           </div>
         </section>
 
-        <section class="writing-tools" aria-label="작성 도구" data-window="tools" data-window-title="도구 패널">
+        <section class="writing-tools" aria-label="작성 도구">
           <div class="tool-section">
             <span class="tool-section-title">서식</span>
             <div class="tool-grid tool-grid-format">
@@ -209,7 +209,33 @@
         </section>
       </div>
     </section>
-    <div class="window-dock" id="windowDock" aria-label="창 복원"></div>
+    <aside class="app-launcher" aria-label="보조 앱">
+      <button class="app-icon" type="button" data-open-app="tools" title="도구 패널 열기">
+        <span class="app-icon-glyph" aria-hidden="true">TL</span>
+        <span>도구</span>
+      </button>
+      <button class="app-icon" type="button" data-open-app="images" title="이미지 보관함 열기">
+        <span class="app-icon-glyph" aria-hidden="true">IM</span>
+        <span>이미지</span>
+      </button>
+      <button class="app-icon" type="button" data-open-app="templates" title="템플릿 열기">
+        <span class="app-icon-glyph" aria-hidden="true">TP</span>
+        <span>템플릿</span>
+      </button>
+      <button class="app-icon" type="button" data-open-app="files" title="파일 창 열기">
+        <span class="app-icon-glyph" aria-hidden="true">FI</span>
+        <span>파일</span>
+      </button>
+      <button class="app-icon" type="button" data-open-app="stickers" title="스티커 열기">
+        <span class="app-icon-glyph" aria-hidden="true">ST</span>
+        <span>스티커</span>
+      </button>
+      <button class="app-icon" type="button" data-open-app="settings" title="설정 열기">
+        <span class="app-icon-glyph" aria-hidden="true">SE</span>
+        <span>설정</span>
+      </button>
+    </aside>
+    <div class="mini-window-layer" id="miniWindowLayer" aria-live="polite"></div>
   </section>
 
   <main id="content" class="site-content">
@@ -300,10 +326,10 @@
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js?v=desktop-windows-2", { scope: "./" }).catch(() => {});
+        navigator.serviceWorker.register("sw.js?v=mini-apps-1", { scope: "./" }).catch(() => {});
       });
     }
   </script>
-  <script type="module" src="main.js?v=desktop-windows-2"></script>
+  <script type="module" src="main.js?v=mini-apps-1"></script>
 </body>
 </html>

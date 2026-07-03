@@ -27,7 +27,7 @@ export const elements = {
   tagInput: document.querySelector("#tagInput"),
   memoCanvas: document.querySelector("#memoCanvas"),
   canvasContextMenu: document.querySelector("#canvasContextMenu"),
-  windowDock: document.querySelector("#windowDock"),
+  miniWindowLayer: document.querySelector("#miniWindowLayer"),
   imageBoard: document.querySelector("#memoCanvas"),
   contentInput: document.querySelector("#contentInput"),
   template: document.querySelector("#noteItemTemplate")

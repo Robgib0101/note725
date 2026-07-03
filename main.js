@@ -25,7 +25,7 @@ let unsubscribeNotes;
 let activeCanvasItemId;
 let contextMenuItemId;
 let zCounter = 20;
-let panelWindowZ = 70;
+let miniWindowZ = 90;
 
 const CANVAS_DEFAULTS = {
   textWidth: 520,
@@ -663,10 +663,303 @@ function createCanvasItemTitlebar(item, element) {
   return grip;
 }
 
+
+const MINI_APPS = {
+  tools: { title: "도구 패널", x: 92, y: 82, width: 300 },
+  images: { title: "이미지 보관함", x: 124, y: 112, width: 340 },
+  templates: { title: "템플릿", x: 154, y: 142, width: 300 },
+  files: { title: "파일", x: 184, y: 172, width: 310 },
+  stickers: { title: "스티커", x: 214, y: 202, width: 300 },
+  settings: { title: "설정", x: 244, y: 232, width: 320 }
+};
+
+function getMiniWindow(appId) {
+  return elements.miniWindowLayer?.querySelector('[data-mini-window="' + CSS.escape(appId) + '"]');
+}
+
+function bringMiniWindowToFront(windowElement) {
+  windowElement.style.zIndex = String(++miniWindowZ);
+}
+
+function createMiniWindowButton(action, label, symbol) {
+  const button = document.createElement("button");
+  button.className = "mini-window-control mini-window-control--" + action;
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.textContent = symbol;
+  return button;
+}
+
+function startMiniWindowDrag(event, windowElement) {
+  event.preventDefault();
+  bringMiniWindowToFront(windowElement);
+
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startLeft = Number(windowElement.dataset.windowX || 0);
+  const startTop = Number(windowElement.dataset.windowY || 0);
+  const bounds = elements.appShell.getBoundingClientRect();
+
+  function handleMove(moveEvent) {
+    const width = windowElement.offsetWidth;
+    const height = windowElement.offsetHeight;
+    const nextX = clamp(startLeft + moveEvent.clientX - startX, 10, Math.max(10, bounds.width - width - 10));
+    const nextY = clamp(startTop + moveEvent.clientY - startY, 10, Math.max(10, bounds.height - height - 10));
+    windowElement.dataset.windowX = String(Math.round(nextX));
+    windowElement.dataset.windowY = String(Math.round(nextY));
+    windowElement.style.left = Math.round(nextX) + "px";
+    windowElement.style.top = Math.round(nextY) + "px";
+  }
+
+  function handleUp() {
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handleUp);
+  }
+
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handleUp, { once: true });
+}
+
+function startMiniWindowResize(event, windowElement) {
+  event.preventDefault();
+  event.stopPropagation();
+  bringMiniWindowToFront(windowElement);
+
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startWidth = windowElement.offsetWidth;
+  const startHeight = windowElement.offsetHeight;
+
+  function handleMove(moveEvent) {
+    windowElement.style.width = clamp(startWidth + moveEvent.clientX - startX, 240, 520) + "px";
+    windowElement.style.minHeight = clamp(startHeight + moveEvent.clientY - startY, 160, 620) + "px";
+  }
+
+  function handleUp() {
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handleUp);
+  }
+
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handleUp, { once: true });
+}
+
+function createMiniWindow(appId) {
+  const config = MINI_APPS[appId];
+  if (!config || !elements.miniWindowLayer) {
+    return null;
+  }
+
+  const windowElement = document.createElement("section");
+  windowElement.className = "mini-app-window";
+  windowElement.dataset.miniWindow = appId;
+  windowElement.dataset.windowX = String(config.x);
+  windowElement.dataset.windowY = String(config.y);
+  windowElement.style.left = config.x + "px";
+  windowElement.style.top = config.y + "px";
+  windowElement.style.width = config.width + "px";
+  windowElement.hidden = true;
+  windowElement.setAttribute("aria-label", config.title);
+
+  const titlebar = document.createElement("div");
+  titlebar.className = "mini-window-titlebar";
+  titlebar.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest("button")) {
+      startMiniWindowDrag(event, windowElement);
+    }
+  });
+
+  const title = document.createElement("span");
+  title.className = "mini-window-title";
+  title.textContent = config.title;
+
+  const controls = document.createElement("span");
+  controls.className = "mini-window-controls";
+  const closeButton = createMiniWindowButton("close", "닫기", "×");
+  closeButton.addEventListener("click", () => {
+    windowElement.hidden = true;
+  });
+  controls.append(closeButton);
+  titlebar.append(title, controls);
+
+  const body = document.createElement("div");
+  body.className = "mini-window-body";
+
+  const resizer = document.createElement("div");
+  resizer.className = "mini-window-resizer";
+  resizer.title = "창 크기 조절";
+  resizer.addEventListener("pointerdown", (event) => startMiniWindowResize(event, windowElement));
+
+  windowElement.append(titlebar, body, resizer);
+  windowElement.addEventListener("pointerdown", () => bringMiniWindowToFront(windowElement));
+  elements.miniWindowLayer.append(windowElement);
+  return windowElement;
+}
+
+function openMiniApp(appId) {
+  let windowElement = getMiniWindow(appId) || createMiniWindow(appId);
+  if (!windowElement) {
+    return;
+  }
+
+  renderMiniApp(appId, windowElement.querySelector(".mini-window-body"));
+  windowElement.hidden = false;
+  bringMiniWindowToFront(windowElement);
+}
+
+function createMiniButton(label, action, className = "mini-command") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener("click", action);
+  return button;
+}
+
+function renderMiniApp(appId, body) {
+  body.innerHTML = "";
+
+  if (appId === "tools") {
+    const grid = document.createElement("div");
+    grid.className = "mini-command-grid";
+    grid.append(
+      createMiniButton("텍스트 블록", () => addCanvasText("")),
+      createMiniButton("이미지 추가", requestImageFiles),
+      createMiniButton("TXT 불러오기", requestTextFile),
+      createMiniButton("날짜 삽입", () => applyFormat("date")),
+      createMiniButton("다운로드", downloadActiveNote),
+      createMiniButton(isFocusMode ? "목록 보기" : "집중 모드", () => elements.focusButton.click())
+    );
+    body.append(grid);
+    return;
+  }
+
+  if (appId === "images") {
+    const note = getActiveNote();
+    const items = getCanvasItems(note).filter((item) => item.type === "image");
+    const summary = document.createElement("p");
+    summary.className = "mini-window-note";
+    summary.textContent = items.length ? "현재 메모의 이미지 " + items.length + "개" : "아직 이미지가 없습니다.";
+    body.append(summary, createMiniButton("이미지 추가", requestImageFiles));
+
+    const list = document.createElement("div");
+    list.className = "mini-image-list";
+    items.slice(0, 6).forEach((item, index) => {
+      const thumb = document.createElement("button");
+      thumb.type = "button";
+      thumb.className = "mini-image-thumb";
+      const image = item.images[0];
+
+      if (image?.src) {
+        const img = document.createElement("img");
+        img.src = image.src;
+        img.alt = image.name || "첨부 이미지";
+        thumb.append(img);
+      }
+
+      const label = document.createElement("span");
+      label.textContent = item.caption || image?.name || "이미지 " + (index + 1);
+      thumb.append(label);
+      thumb.addEventListener("click", () => focusCanvasItem(item.id));
+      list.append(thumb);
+    });
+    body.append(list);
+    return;
+  }
+
+  if (appId === "templates") {
+    const list = document.createElement("div");
+    list.className = "mini-command-list";
+    [
+      ["오늘 기록", "daily"],
+      ["회의록", "meeting"],
+      ["아이디어", "idea"],
+      ["작업 목록", "tasks"]
+    ].forEach(([label, value]) => {
+      list.append(createMiniButton(label, () => insertTemplate(value)));
+    });
+    body.append(list);
+    return;
+  }
+
+  if (appId === "files") {
+    const list = document.createElement("div");
+    list.className = "mini-command-list";
+    list.append(
+      createMiniButton("새 메모", () => createNote()),
+      createMiniButton("TXT 불러오기", requestTextFile),
+      createMiniButton("메모 다운로드", downloadActiveNote)
+    );
+    body.append(list);
+    return;
+  }
+
+  if (appId === "stickers") {
+    const list = document.createElement("div");
+    list.className = "mini-sticker-grid";
+    [
+      ["중요", "중요:\n"],
+      ["아이디어", "아이디어:\n"],
+      ["할 일", "할 일:\n- [ ] "],
+      ["메모", "메모:\n"]
+    ].forEach(([label, text]) => {
+      list.append(createMiniButton(label, () => addCanvasText(text, {
+        x: 96 + getActiveCanvasItems().length * 18,
+        y: 96 + getActiveCanvasItems().length * 18,
+        width: 260,
+        height: 160
+      }), "mini-sticker-button"));
+    });
+    body.append(list);
+    return;
+  }
+
+  if (appId === "settings") {
+    const note = getActiveNote();
+    const list = document.createElement("div");
+    list.className = "mini-command-list";
+    list.append(
+      createMiniButton(note?.pinned ? "고정 해제" : "메모 고정", () => elements.pinButton.click()),
+      createMiniButton(isFocusMode ? "목록 표시" : "집중 모드", () => elements.focusButton.click()),
+      createMiniButton("로컬 저장 상태 확인", () => {
+        elements.saveStatus.textContent = notesStore?.enabled ? "Firebase 연결됨" : "로컬 저장 사용 중";
+      }),
+      createMiniButton("화면 새로고침", () => window.location.reload())
+    );
+    body.append(list);
+  }
+}
+
+function focusCanvasItem(itemId) {
+  const itemElement = elements.memoCanvas.querySelector('[data-item-id="' + CSS.escape(itemId) + '"]');
+  if (!itemElement) {
+    return;
+  }
+
+  activateCanvasItem(itemId);
+  itemElement.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+}
+
+function setupMiniApps() {
+  document.querySelectorAll("[data-open-app]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".app-icon.is-selected").forEach((item) => item.classList.remove("is-selected"));
+      button.classList.add("is-selected");
+    });
+    button.addEventListener("dblclick", () => openMiniApp(button.dataset.openApp));
+    button.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openMiniApp(button.dataset.openApp);
+      }
+    });
+  });
+}
+
 function createCanvasElement(item) {
   const element = document.createElement("article");
   element.className = "canvas-item canvas-item--" + item.type + " canvas-theme--" + item.theme + " canvas-crop--" + item.crop;
-  element.classList.toggle("is-canvas-minimized", item.windowState === "minimized");
   element.dataset.itemId = item.id;
   element.dataset.itemType = item.type;
   element.style.left = item.x + "px";
@@ -676,7 +969,11 @@ function createCanvasElement(item) {
   element.style.zIndex = String(item.z);
   element.tabIndex = 0;
 
-  const grip = createCanvasItemTitlebar(item, element);
+  const grip = document.createElement("div");
+  grip.className = "canvas-item-grip";
+  grip.textContent = "이동";
+  grip.title = "드래그해서 이동";
+  grip.addEventListener("pointerdown", (event) => startCanvasDrag(event, item, element));
 
   const resizeHandle = document.createElement("div");
   resizeHandle.className = "canvas-resize-handle";
@@ -1485,6 +1782,6 @@ document.addEventListener("click", (event) => {
 });
 window.addEventListener("beforeunload", () => unsubscribeNotes?.());
 
-setupPanelWindows();
+setupMiniApps();
 render();
 connectFirestore();

@@ -1,4 +1,4 @@
-const CACHE_NAME = "really-notepad-windows-v2";
+const CACHE_NAME = "really-notepad-mini-apps-v3";
 const BASE_PATH = new URL("./", self.location).pathname;
 
 const CORE_ASSETS = [
