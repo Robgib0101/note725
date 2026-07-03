@@ -25,6 +25,9 @@ let activeCanvasItemId;
 let contextMenuItemId;
 let zCounter = 20;
 let miniWindowZ = 90;
+let toolPanelMode = "docked";
+let toolPanelRestoreMode = "docked";
+let toolPanelZ = 86;
 
 const CANVAS_DEFAULTS = {
   textWidth: 520,
@@ -684,14 +687,176 @@ function getMiniAppButton(appId) {
   return document.querySelector(`[data-open-app="${CSS.escape(appId)}"]`);
 }
 
+function getToolPanelPosition() {
+  const workspace = elements.editorWorkspace || elements.appShell;
+  const panelWidth = Math.min(320, Math.max(260, (workspace?.clientWidth || 1180) * 0.28));
+  const x = clamp((workspace?.clientWidth || 1180) - panelWidth - 88, 12, Math.max(12, (workspace?.clientWidth || 1180) - panelWidth - 12));
+  const y = 14;
+
+  return { x, y };
+}
+
+function setToolPanelPosition(x, y) {
+  const workspace = elements.editorWorkspace || elements.appShell;
+  const panel = elements.writingTools;
+
+  if (!panel || !workspace) {
+    return;
+  }
+
+  const maxX = Math.max(12, workspace.clientWidth - panel.offsetWidth - 12);
+  const maxY = Math.max(12, workspace.clientHeight - Math.min(panel.offsetHeight, workspace.clientHeight - 24) - 12);
+  const nextX = Math.round(clamp(x, 12, maxX));
+  const nextY = Math.round(clamp(y, 12, maxY));
+
+  panel.dataset.panelX = String(nextX);
+  panel.dataset.panelY = String(nextY);
+  panel.style.left = nextX + "px";
+  panel.style.top = nextY + "px";
+}
+
+function updateToolPanelControls() {
+  const isDocked = toolPanelMode === "docked";
+  const isMinimized = toolPanelMode === "minimized";
+
+  if (elements.toolPanelFloatButton) {
+    elements.toolPanelFloatButton.textContent = isDocked ? "↗" : "▣";
+    elements.toolPanelFloatButton.title = isDocked ? "창으로 띄우기" : "오른쪽에 고정";
+    elements.toolPanelFloatButton.setAttribute("aria-label", elements.toolPanelFloatButton.title);
+  }
+
+  if (elements.toolPanelMinimizeButton) {
+    elements.toolPanelMinimizeButton.textContent = isMinimized ? "▣" : "−";
+    elements.toolPanelMinimizeButton.title = isMinimized ? "복원" : "최소화";
+    elements.toolPanelMinimizeButton.setAttribute("aria-label", elements.toolPanelMinimizeButton.title);
+  }
+}
+
+function setToolPanelMode(mode) {
+  const panel = elements.writingTools;
+
+  if (!panel || !elements.editorWorkspace) {
+    return;
+  }
+
+  if (mode === "docked" || mode === "floating") {
+    toolPanelRestoreMode = mode;
+  }
+
+  toolPanelMode = mode;
+  panel.dataset.panelState = mode;
+  panel.hidden = mode === "closed";
+  panel.classList.toggle("is-tools-floating", mode === "floating" || mode === "minimized");
+  panel.classList.toggle("is-tools-minimized", mode === "minimized");
+  elements.editorWorkspace.classList.toggle("is-tools-collapsed", mode !== "docked");
+
+  if (mode === "docked" || mode === "closed") {
+    panel.style.left = "";
+    panel.style.top = "";
+    panel.style.zIndex = "";
+  } else {
+    const fallback = getToolPanelPosition();
+    const x = Number(panel.dataset.panelX || fallback.x);
+    const y = Number(panel.dataset.panelY || fallback.y);
+    panel.style.zIndex = String(++toolPanelZ);
+    setToolPanelPosition(x, y);
+  }
+
+  updateToolPanelControls();
+  updateMiniAppButtonState("tools");
+}
+
+function restoreToolPanel() {
+  setToolPanelMode(toolPanelRestoreMode || "docked");
+}
+
+function toggleToolPanelFloat() {
+  if (toolPanelMode === "docked") {
+    setToolPanelMode("floating");
+    return;
+  }
+
+  setToolPanelMode("docked");
+}
+
+function startToolPanelDrag(event) {
+  if (event.target.closest("button")) {
+    return;
+  }
+
+  event.preventDefault();
+
+  if (toolPanelMode === "docked" || toolPanelMode === "closed") {
+    setToolPanelMode("floating");
+  }
+
+  const panel = elements.writingTools;
+  if (!panel) {
+    return;
+  }
+
+  panel.style.zIndex = String(++toolPanelZ);
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startLeft = Number(panel.dataset.panelX || 12);
+  const startTop = Number(panel.dataset.panelY || 12);
+
+  function handleMove(moveEvent) {
+    setToolPanelPosition(startLeft + moveEvent.clientX - startX, startTop + moveEvent.clientY - startY);
+  }
+
+  function handleUp() {
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handleUp);
+  }
+
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handleUp, { once: true });
+}
+
+function setupToolPanel() {
+  if (!elements.writingTools) {
+    return;
+  }
+
+  elements.toolPanelTitlebar?.addEventListener("pointerdown", startToolPanelDrag);
+  elements.toolPanelFloatButton?.addEventListener("click", toggleToolPanelFloat);
+  elements.toolPanelMinimizeButton?.addEventListener("click", () => {
+    if (toolPanelMode === "minimized") {
+      restoreToolPanel();
+      return;
+    }
+
+    toolPanelRestoreMode = toolPanelMode === "floating" ? "floating" : "docked";
+    setToolPanelMode("minimized");
+  });
+  elements.toolPanelCloseButton?.addEventListener("click", () => {
+    if (toolPanelMode === "floating" || toolPanelMode === "docked") {
+      toolPanelRestoreMode = toolPanelMode;
+    }
+
+    setToolPanelMode("closed");
+  });
+  setToolPanelMode("docked");
+}
+
 function updateMiniAppButtonState(appId) {
   const button = getMiniAppButton(appId);
-  const windowElement = getMiniWindow(appId);
 
   if (!button) {
     return;
   }
 
+  if (appId === "tools" && elements.writingTools) {
+    const isVisible = !elements.writingTools.hidden;
+    const isMinimized = toolPanelMode === "minimized";
+    button.classList.toggle("is-open", isVisible && !isMinimized);
+    button.classList.toggle("is-minimized", isMinimized);
+    button.setAttribute("aria-pressed", String(button.classList.contains("is-selected") || isVisible));
+    return;
+  }
+
+  const windowElement = getMiniWindow(appId);
   const isVisible = Boolean(windowElement && !windowElement.hidden);
   const isMinimized = windowElement?.dataset.windowState === "minimized";
   button.classList.toggle("is-open", isVisible);
@@ -838,6 +1003,11 @@ function createMiniWindow(appId) {
 }
 
 function openMiniApp(appId) {
+  if (appId === "tools") {
+    restoreToolPanel();
+    return;
+  }
+
   let windowElement = getMiniWindow(appId) || createMiniWindow(appId);
   if (!windowElement) {
     return;
@@ -1835,6 +2005,7 @@ document.addEventListener("click", (event) => {
 });
 window.addEventListener("beforeunload", () => unsubscribeNotes?.());
 
+setupToolPanel();
 setupMiniApps();
 render();
 connectFirestore();

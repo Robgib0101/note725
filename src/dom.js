@@ -1,5 +1,6 @@
 export const elements = {
   appShell: document.querySelector("#appShell"),
+  editorWorkspace: document.querySelector("#editorWorkspace"),
   newNoteButton: document.querySelector("#newNoteButton"),
   searchInput: document.querySelector("#searchInput"),
   noteCount: document.querySelector("#noteCount"),
@@ -23,6 +24,11 @@ export const elements = {
   importTextButton: document.querySelector("#importTextButton"),
   textInput: document.querySelector("#textInput"),
   templateSelect: document.querySelector("#templateSelect"),
+  writingTools: document.querySelector("#writingTools"),
+  toolPanelTitlebar: document.querySelector("#toolPanelTitlebar"),
+  toolPanelFloatButton: document.querySelector("#toolPanelFloatButton"),
+  toolPanelMinimizeButton: document.querySelector("#toolPanelMinimizeButton"),
+  toolPanelCloseButton: document.querySelector("#toolPanelCloseButton"),
   titleInput: document.querySelector("#titleInput"),
   tagInput: document.querySelector("#tagInput"),
   memoCanvas: document.querySelector("#memoCanvas"),

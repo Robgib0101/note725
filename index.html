@@ -26,7 +26,7 @@
   <meta property="og:description" content="Really Notepad는 브라우저에서 바로 쓰는 자동 저장 메모장입니다. 태그, 이미지 메모, 체크리스트, 템플릿과 함께 기록을 오래 유지하는 방법을 제공합니다.">
   <meta property="og:url" content="https://robgib0101.github.io/note725/">
   <meta property="og:image" content="https://robgib0101.github.io/note725/assets/productivity-workspace.png">
-  <link rel="stylesheet" href="style.css?v=launcher-system-1">
+  <link rel="stylesheet" href="style.css?v=tool-panel-1">
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6925363929827743"
      crossorigin="anonymous"></script>
   <script type="application/ld+json">{
@@ -102,7 +102,7 @@
         </div>
       </section>
 
-      <div class="editor-workspace">
+      <div class="editor-workspace" id="editorWorkspace">
         <section class="note-paper" aria-label="메모 작성 영역">
           <div class="note-paper-header">
             <label class="note-title-field" for="titleInput">
@@ -145,7 +145,16 @@
           </div>
         </section>
 
-        <section class="writing-tools" aria-label="작성 도구">
+        <section id="writingTools" class="writing-tools" aria-label="작성 도구" data-panel-state="docked">
+          <div class="tool-panel-titlebar" id="toolPanelTitlebar">
+            <span class="tool-panel-title">작성 도구</span>
+            <span class="tool-panel-hint">드래그</span>
+            <span class="tool-panel-controls">
+              <button id="toolPanelFloatButton" class="tool-panel-control" type="button" title="창으로 띄우기" aria-label="창으로 띄우기">↗</button>
+              <button id="toolPanelMinimizeButton" class="tool-panel-control" type="button" title="최소화" aria-label="최소화">−</button>
+              <button id="toolPanelCloseButton" class="tool-panel-control tool-panel-control-close" type="button" title="닫기" aria-label="닫기">×</button>
+            </span>
+          </div>
           <div class="tool-section">
             <span class="tool-section-title">서식</span>
             <div class="tool-grid tool-grid-format">
@@ -358,10 +367,10 @@
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js?v=launcher-system-1", { scope: "./" }).catch(() => {});
+        navigator.serviceWorker.register("sw.js?v=tool-panel-1", { scope: "./" }).catch(() => {});
       });
     }
   </script>
-  <script type="module" src="main.js?v=launcher-system-1"></script>
+  <script type="module" src="main.js?v=tool-panel-1"></script>
 </body>
 </html>
