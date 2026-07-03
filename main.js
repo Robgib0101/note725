@@ -11,10 +11,9 @@ import {
   parseTags,
   getContentStats,
   getImageCount,
-  getSafeFilename
 } from "./src/text.js";
 import { createImageBlocksFromFiles } from "./src/images.js";
-import { buildHtmlExport, buildTextExport } from "./src/export.js";
+import { buildImageFiles, buildTextExport, buildZipBlob, getExportBasename, getNoteImages } from "./src/export.js?v=download-export-1";
 
 let notes = loadNotes();
 let activeId = notes[0]?.id;
@@ -1523,15 +1522,7 @@ function deleteActiveNote() {
   render();
 }
 
-function downloadActiveNote() {
-  const note = getActiveNote();
-  const hasImages = getImageCount(note) > 0;
-  const hasCanvasLayout = (note.canvasItems?.length ?? 0) > 1 || note.canvasItems?.some((item) => item.type === "image");
-  const shouldExportHtml = hasImages || hasCanvasLayout;
-  const filename = getSafeFilename(getTitle(note), shouldExportHtml ? ".html" : ".txt");
-  const body = shouldExportHtml ? buildHtmlExport(note) : buildTextExport(note);
-  const type = shouldExportHtml ? "text/html;charset=utf-8" : "text/plain;charset=utf-8";
-  const blob = new Blob([body], { type });
+function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
 
@@ -1539,6 +1530,26 @@ function downloadActiveNote() {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadActiveNote() {
+  const note = getActiveNote();
+  const basename = getExportBasename(note);
+  const imageEntries = getNoteImages(note);
+  const textBody = buildTextExport(note, imageEntries);
+  const textFilename = basename + ".txt";
+
+  if (imageEntries.length === 0) {
+    downloadBlob(new Blob([textBody], { type: "text/plain;charset=utf-8" }), textFilename);
+    return;
+  }
+
+  const zipBlob = buildZipBlob([
+    { name: textFilename, data: textBody },
+    ...buildImageFiles(imageEntries)
+  ], note.updatedAt || Date.now());
+
+  downloadBlob(zipBlob, basename + ".zip");
 }
 
 function getLineStart(value, position) {
