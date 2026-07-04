@@ -32,6 +32,20 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function readImageSize(src) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.addEventListener("load", () => {
+      resolve({
+        width: image.naturalWidth,
+        height: image.naturalHeight
+      });
+    }, { once: true });
+    image.addEventListener("error", () => resolve({ width: 0, height: 0 }), { once: true });
+    image.src = src;
+  });
+}
+
 function clampWidth(value) {
   const number = Number(value);
 
@@ -58,11 +72,18 @@ function normalizeBlock(block) {
 export async function createImageBlocksFromFiles(files, layout, style) {
   const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
   const images = await Promise.all(
-    imageFiles.map(async (file) => ({
-      id: createId(),
-      name: file.name,
-      src: await readFileAsDataUrl(file)
-    }))
+    imageFiles.map(async (file) => {
+      const src = await readFileAsDataUrl(file);
+      const size = await readImageSize(src);
+
+      return {
+        id: createId(),
+        name: file.name,
+        src,
+        width: size.width,
+        height: size.height
+      };
+    })
   );
 
   if (images.length === 0) {

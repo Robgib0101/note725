@@ -43,7 +43,7 @@ export function getPreview(note) {
 export function getSearchText(note) {
   const canvasText = getCanvasText(note);
   const canvasCaptions = (note.canvasItems ?? [])
-    .map((item) => [item.caption, item.note].filter(Boolean).join(" "))
+    .map((item) => [item.title, item.caption, item.note].filter(Boolean).join(" "))
     .join(" ");
 
   return [note.title, note.content, canvasText, canvasCaptions, ...(note.tags ?? [])].join(" ").toLowerCase();

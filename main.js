@@ -15,8 +15,8 @@ import {
 import { createImageBlocksFromFiles } from "./src/images.js";
 import { buildImageFiles, buildTextExport, buildZipBlob, getExportBasename, getNoteImages } from "./src/export.js?v=download-export-1";
 
-let notes = loadNotes();
-let activeId = notes[0]?.id;
+let notes = [];
+let activeId;
 let saveTimer;
 let saveRevision = 0;
 let notesStore;
@@ -25,7 +25,7 @@ let activeCanvasItemId;
 let contextMenuItemId;
 let zCounter = 20;
 let miniWindowZ = 90;
-let toolPanelMode = "docked";
+let toolPanelMode = "closed";
 let toolPanelRestoreMode = "docked";
 let toolPanelZ = 86;
 
@@ -38,8 +38,10 @@ const CANVAS_DEFAULTS = {
   minTextHeight: 110,
   minImageWidth: 120,
   minImageHeight: 90,
-  maxX: 2400,
-  maxY: 1800
+  maxX: 1600,
+  maxY: 1200,
+  canvasPadding: 32,
+  canvasBottomPadding: 48
 };
 
 function clamp(value, min, max) {
@@ -51,22 +53,83 @@ function normalizeNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function normalizeAspectRatio(value) {
+  const ratio = Number(value);
+  return Number.isFinite(ratio) && ratio > 0 ? clamp(ratio, 0.25, 4) : undefined;
+}
+
+function getImageAspectRatioFromImage(image) {
+  const width = Number(image?.width);
+  const height = Number(image?.height);
+  return width > 0 && height > 0 ? normalizeAspectRatio(width / height) : undefined;
+}
+
+function getImageAspectRatio(item) {
+  const explicitRatio = normalizeAspectRatio(item?.aspectRatio);
+
+  if (explicitRatio) {
+    return explicitRatio;
+  }
+
+  const imageRatio = getImageAspectRatioFromImage(Array.isArray(item?.images) ? item.images[0] : undefined);
+
+  if (imageRatio) {
+    return imageRatio;
+  }
+
+  const width = normalizeNumber(item?.width, CANVAS_DEFAULTS.imageWidth);
+  const height = normalizeNumber(item?.height, CANVAS_DEFAULTS.imageHeight);
+  return normalizeAspectRatio(width / height) || CANVAS_DEFAULTS.imageWidth / CANVAS_DEFAULTS.imageHeight;
+}
+
+function getDefaultImageSize(image, position = {}) {
+  const aspectRatio = normalizeAspectRatio(position.aspectRatio)
+    || getImageAspectRatioFromImage(image)
+    || CANVAS_DEFAULTS.imageWidth / CANVAS_DEFAULTS.imageHeight;
+  const maxWidth = 360;
+  const maxHeight = 260;
+  let width = clamp(normalizeNumber(position.width, CANVAS_DEFAULTS.imageWidth), CANVAS_DEFAULTS.minImageWidth, maxWidth);
+  let height = Math.round(width / aspectRatio);
+
+  if (height > maxHeight) {
+    height = maxHeight;
+    width = Math.round(height * aspectRatio);
+  }
+
+  return {
+    width: clamp(width, CANVAS_DEFAULTS.minImageWidth, maxWidth),
+    height: clamp(height, CANVAS_DEFAULTS.minImageHeight, maxHeight),
+    aspectRatio
+  };
+}
+
+function getCanvasItemFallbackTitle(item) {
+  if (item.type === "image") {
+    return "이미지";
+  }
+
+  return item.text.trim().startsWith("메모") ? "메모" : "텍스트";
+}
+
 function normalizeCanvasItem(item, index = 0) {
   const type = item?.type === "image" ? "image" : "text";
   const minWidth = type === "image" ? CANVAS_DEFAULTS.minImageWidth : CANVAS_DEFAULTS.minTextWidth;
   const minHeight = type === "image" ? CANVAS_DEFAULTS.minImageHeight : CANVAS_DEFAULTS.minTextHeight;
   const fallbackWidth = type === "image" ? CANVAS_DEFAULTS.imageWidth : CANVAS_DEFAULTS.textWidth;
-  const fallbackHeight = type === "image" ? CANVAS_DEFAULTS.imageHeight : CANVAS_DEFAULTS.textHeight;
+  const aspectRatio = type === "image" ? getImageAspectRatio(item) : undefined;
+  const fallbackHeight = type === "image" ? Math.round(fallbackWidth / aspectRatio) : CANVAS_DEFAULTS.textHeight;
 
   return {
     id: item?.id || createId(),
     type,
+    title: item?.title ?? "",
     text: item?.text ?? "",
     images: Array.isArray(item?.images) ? item.images : [],
     caption: item?.caption ?? "",
     note: item?.note ?? "",
     theme: item?.theme || item?.style || "plain",
     crop: item?.crop || "original",
+    aspectRatio,
     x: clamp(normalizeNumber(item?.x, 56 + index * 28), 0, CANVAS_DEFAULTS.maxX),
     y: clamp(normalizeNumber(item?.y, 56 + index * 28), 0, CANVAS_DEFAULTS.maxY),
     width: clamp(normalizeNumber(item?.width, fallbackWidth), minWidth, 1200),
@@ -80,6 +143,7 @@ function createTextCanvasItem(text = "", position = {}) {
   return normalizeCanvasItem({
     id: createId(),
     type: "text",
+    title: position.title ?? "",
     text,
     theme: "plain",
     x: position.x ?? 56,
@@ -91,18 +155,22 @@ function createTextCanvasItem(text = "", position = {}) {
 }
 
 function createImageCanvasItem(image, position = {}, source = {}) {
+  const defaultSize = getDefaultImageSize(image, position);
+
   return normalizeCanvasItem({
     id: createId(),
     type: "image",
+    title: source.title ?? position.title ?? "",
     images: [image],
     caption: source.caption ?? "",
     note: source.note ?? "",
     theme: source.theme || source.style || "plain",
     crop: source.crop || "original",
+    aspectRatio: defaultSize.aspectRatio,
     x: position.x ?? 80,
     y: position.y ?? 90,
-    width: position.width ?? CANVAS_DEFAULTS.imageWidth,
-    height: position.height ?? CANVAS_DEFAULTS.imageHeight,
+    width: defaultSize.width,
+    height: defaultSize.height,
     z: getNextZ()
   });
 }
@@ -131,6 +199,43 @@ function convertLegacyImagesToCanvasItems(images = []) {
   return items;
 }
 
+function normalizeNote(note = {}) {
+  const now = Date.now();
+  const normalizedNote = {
+    id: note.id || createId(),
+    title: typeof note.title === "string" ? note.title : "",
+    content: typeof note.content === "string" ? note.content : "",
+    tags: Array.isArray(note.tags) ? note.tags.filter(Boolean).map(String) : [],
+    images: Array.isArray(note.images) ? note.images : [],
+    canvasItems: Array.isArray(note.canvasItems) ? note.canvasItems : [],
+    pinned: Boolean(note.pinned),
+    createdAt: normalizeNumber(note.createdAt, now),
+    updatedAt: normalizeNumber(note.updatedAt, now)
+  };
+
+  const items = getCanvasItems(normalizedNote);
+  normalizedNote.canvasItems = items;
+  normalizedNote.content = deriveContentFromCanvasItems(items);
+  normalizedNote.images = deriveImagesFromCanvasItems(items);
+  return normalizedNote;
+}
+
+function initializeNotes() {
+  try {
+    notes = loadNotes().map(normalizeNote);
+  } catch (error) {
+    console.error(error);
+    notes = [];
+  }
+
+  if (notes.length === 0) {
+    notes = [normalizeNote({})];
+  }
+
+  activeId = notes[0]?.id;
+  saveNotes(notes);
+}
+
 function getCanvasItems(note) {
   if (!note) {
     return [];
@@ -141,7 +246,7 @@ function getCanvasItems(note) {
   }
 
   const items = [];
-  const content = note.content ?? "";
+  const content = typeof note.content === "string" ? note.content : "";
 
   items.push(createTextCanvasItem(content, {
     x: 56,
@@ -150,7 +255,7 @@ function getCanvasItems(note) {
     height: content.trim() ? CANVAS_DEFAULTS.textHeight : 220
   }));
 
-  items.push(...convertLegacyImagesToCanvasItems(note.images ?? []));
+  items.push(...convertLegacyImagesToCanvasItems(Array.isArray(note.images) ? note.images : []));
   return items;
 }
 
@@ -183,8 +288,10 @@ function deriveImagesFromCanvasItems(items) {
       layout: "free",
       style: item.theme === "plain" ? "clean" : item.theme,
       crop: item.crop,
+      title: item.title,
       width: Math.round(item.width),
       height: Math.round(item.height),
+      aspectRatio: item.aspectRatio,
       x: Math.round(item.x),
       y: Math.round(item.y),
       caption: item.caption,
@@ -231,6 +338,29 @@ function removeCanvasItem(itemId) {
 
   hideCanvasContextMenu();
   syncCanvasItems(nextItems, true);
+}
+
+function duplicateCanvasItem(itemId) {
+  const activeNote = getActiveNote();
+  const items = ensureCanvasItems(activeNote);
+  const item = items.find((canvasItem) => canvasItem.id === itemId);
+
+  if (!item) {
+    return;
+  }
+
+  const duplicate = normalizeCanvasItem({
+    ...item,
+    id: createId(),
+    x: clamp(item.x + 28, 0, CANVAS_DEFAULTS.maxX),
+    y: clamp(item.y + 28, 0, CANVAS_DEFAULTS.maxY),
+    windowState: "normal",
+    z: getNextZ()
+  });
+
+  activeCanvasItemId = duplicate.id;
+  hideCanvasContextMenu();
+  syncCanvasItems([...items, duplicate], true);
 }
 
 function addCanvasText(text = "", position = {}) {
@@ -316,6 +446,38 @@ function focusCanvasTextItem(itemId) {
   selection.addRange(range);
 }
 
+function getCanvasViewportSize() {
+  const wrap = elements.memoCanvas.parentElement;
+
+  return {
+    width: Math.max(320, wrap?.clientWidth || elements.memoCanvas.clientWidth || 720),
+    height: Math.max(360, wrap?.clientHeight || elements.memoCanvas.clientHeight || 520)
+  };
+}
+
+function getCanvasContentBounds(items) {
+  const visibleItems = items.filter((item) => item.windowState !== "minimized");
+
+  if (visibleItems.length === 0) {
+    return { right: 0, bottom: 0 };
+  }
+
+  return visibleItems.reduce((bounds, item) => ({
+    right: Math.max(bounds.right, item.x + item.width),
+    bottom: Math.max(bounds.bottom, item.y + item.height)
+  }), { right: 0, bottom: 0 });
+}
+
+function resizeCanvasToContent(items = getActiveCanvasItems()) {
+  const viewport = getCanvasViewportSize();
+  const bounds = getCanvasContentBounds(items);
+  const nextWidth = Math.max(viewport.width, Math.ceil(bounds.right + CANVAS_DEFAULTS.canvasPadding));
+  const nextHeight = Math.max(viewport.height, Math.ceil(bounds.bottom + CANVAS_DEFAULTS.canvasBottomPadding));
+
+  elements.memoCanvas.style.width = nextWidth + "px";
+  elements.memoCanvas.style.height = nextHeight + "px";
+}
+
 function renderCanvasForActiveNote() {
   const activeNote = getActiveNote();
   const items = ensureCanvasItems(activeNote);
@@ -326,6 +488,8 @@ function renderCanvasForActiveNote() {
   items.forEach((item) => {
     elements.memoCanvas.append(createCanvasElement(item));
   });
+
+  resizeCanvasToContent(items);
 
   if (!items.some((item) => item.id === activeCanvasItemId)) {
     activeCanvasItemId = items.find((item) => item.type === "text")?.id ?? items[0]?.id;
@@ -566,8 +730,8 @@ function createCanvasWindowButton(action, label, symbol) {
 function toggleCanvasMinimize(item, element, button) {
   const minimized = !element.classList.contains("is-canvas-minimized");
   element.classList.toggle("is-canvas-minimized", minimized);
-  button.textContent = minimized ? "▣" : "−";
-  button.title = minimized ? "복원" : "최소화";
+  button.textContent = minimized ? "+" : "−";
+  button.title = minimized ? "보이기" : "숨기기";
   button.setAttribute("aria-label", button.title);
   updateCanvasItem(item.id, { windowState: minimized ? "minimized" : "normal" }, false);
 }
@@ -618,44 +782,60 @@ function toggleCanvasMaximize(item, element, button) {
 function createCanvasItemTitlebar(item, element) {
   const grip = document.createElement("div");
   grip.className = "canvas-item-grip";
-  grip.title = "드래그해서 이동";
+  grip.title = "상단을 드래그해서 이동";
 
-  const title = document.createElement("span");
-  title.className = "canvas-window-title";
-  title.textContent = item.type === "image" ? "이미지 창" : "텍스트 창";
+  const dragHandle = document.createElement("button");
+  dragHandle.className = "canvas-drag-handle";
+  dragHandle.type = "button";
+  dragHandle.title = "드래그해서 이동";
+  dragHandle.setAttribute("aria-label", "드래그해서 이동");
+  dragHandle.textContent = "⋮⋮";
+  dragHandle.addEventListener("pointerdown", (event) => startCanvasDrag(event, item, element));
+
+  const title = document.createElement("input");
+  title.className = "canvas-title-input";
+  title.type = "text";
+  title.value = item.title;
+  title.placeholder = getCanvasItemFallbackTitle(item);
+  title.setAttribute("aria-label", "박스 제목");
+  title.addEventListener("focus", () => activateCanvasItem(item.id));
+  title.addEventListener("pointerdown", (event) => event.stopPropagation());
+  title.addEventListener("input", (event) => {
+    updateCanvasItem(item.id, { title: event.target.value }, false);
+  });
 
   const controls = document.createElement("span");
   controls.className = "canvas-window-controls";
 
-  const minimizeButton = createCanvasWindowButton(
+  const hideButton = createCanvasWindowButton(
     "minimize",
-    item.windowState === "minimized" ? "복원" : "최소화",
-    item.windowState === "minimized" ? "▣" : "−"
+    item.windowState === "minimized" ? "보이기" : "숨기기",
+    item.windowState === "minimized" ? "+" : "−"
   );
-  minimizeButton.addEventListener("click", (event) => {
+  hideButton.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    toggleCanvasMinimize(item, element, minimizeButton);
+    toggleCanvasMinimize(item, element, hideButton);
   });
 
-  const maximizeButton = createCanvasWindowButton("maximize", "최대화", "□");
-  maximizeButton.addEventListener("click", (event) => {
+  const duplicateButton = createCanvasWindowButton("duplicate", "복제", "⧉");
+  duplicateButton.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    toggleCanvasMaximize(item, element, maximizeButton);
+    duplicateCanvasItem(item.id);
   });
 
-  const closeButton = createCanvasWindowButton("close", "닫기", "×");
-  closeButton.addEventListener("click", (event) => {
+  const deleteButton = createCanvasWindowButton("close", "삭제", "×");
+  deleteButton.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     removeCanvasItem(item.id);
   });
 
-  controls.append(minimizeButton, maximizeButton, closeButton);
-  grip.append(title, controls);
+  controls.append(hideButton, duplicateButton, deleteButton);
+  grip.append(dragHandle, title, controls);
   grip.addEventListener("pointerdown", (event) => {
-    if (event.target.closest("button")) {
+    if (event.target.closest("button, input")) {
       return;
     }
 
@@ -749,6 +929,12 @@ function setToolPanelMode(mode) {
   panel.classList.toggle("is-tools-floating", mode === "floating" || mode === "minimized");
   panel.classList.toggle("is-tools-minimized", mode === "minimized");
   elements.editorWorkspace.classList.toggle("is-tools-collapsed", mode !== "docked");
+  elements.editorWorkspace.classList.toggle("is-tools-minimized", mode === "minimized");
+  elements.editorWorkspace.classList.toggle("is-tools-closed", mode === "closed");
+  elements.appShell.classList.toggle("has-docked-tools", mode === "docked");
+  elements.appShell.classList.toggle("has-floating-tools", mode === "floating");
+  elements.appShell.classList.toggle("has-minimized-tools", mode === "minimized");
+  elements.appShell.classList.toggle("has-closed-tools", mode === "closed");
 
   if (mode === "docked" || mode === "closed") {
     panel.style.left = "";
@@ -776,7 +962,7 @@ function toggleToolPanelFloat() {
     return;
   }
 
-  setToolPanelMode("docked");
+  setToolPanelMode("closed");
 }
 
 function startToolPanelDrag(event) {
@@ -837,7 +1023,7 @@ function setupToolPanel() {
 
     setToolPanelMode("closed");
   });
-  setToolPanelMode("docked");
+  setToolPanelMode("closed");
 }
 
 function updateMiniAppButtonState(appId) {
@@ -1002,6 +1188,27 @@ function createMiniWindow(appId) {
   return windowElement;
 }
 
+function miniAppIsOpen(appId) {
+  if (appId === "tools") {
+    return elements.writingTools && !elements.writingTools.hidden && toolPanelMode !== "minimized";
+  }
+
+  const windowElement = getMiniWindow(appId);
+  return Boolean(windowElement && !windowElement.hidden && windowElement.dataset.windowState === "open");
+}
+
+function closeMiniApp(appId) {
+  if (appId === "tools") {
+    setToolPanelMode("closed");
+    return;
+  }
+
+  const windowElement = getMiniWindow(appId);
+  if (windowElement) {
+    setMiniWindowVisibility(windowElement, "closed");
+  }
+}
+
 function openMiniApp(appId) {
   if (appId === "tools") {
     restoreToolPanel();
@@ -1069,7 +1276,7 @@ function renderMiniApp(appId, body) {
       }
 
       const label = document.createElement("span");
-      label.textContent = item.caption || image?.name || "이미지 " + (index + 1);
+      label.textContent = item.title || item.caption || image?.name || "이미지 " + (index + 1);
       thumb.append(label);
       thumb.addEventListener("click", () => focusCanvasItem(item.id));
       list.append(thumb);
@@ -1154,15 +1361,24 @@ function focusCanvasItem(itemId) {
 function setupMiniApps() {
   document.querySelectorAll("[data-open-app]").forEach((button) => {
     button.addEventListener("click", () => {
+      const appId = button.dataset.openApp;
+      const shouldClose = miniAppIsOpen(appId);
+
       document.querySelectorAll(".app-icon").forEach((item) => item.classList.remove("is-selected"));
-      button.classList.add("is-selected");
+
+      if (shouldClose) {
+        closeMiniApp(appId);
+      } else {
+        button.classList.add("is-selected");
+        openMiniApp(appId);
+      }
+
       document.querySelectorAll("[data-open-app]").forEach((item) => updateMiniAppButtonState(item.dataset.openApp));
     });
-    button.addEventListener("dblclick", () => openMiniApp(button.dataset.openApp));
     button.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        openMiniApp(button.dataset.openApp);
+        button.click();
       }
     });
   });
@@ -1176,16 +1392,17 @@ function createCanvasElement(item) {
   element.style.left = item.x + "px";
   element.style.top = item.y + "px";
   element.style.width = item.width + "px";
-  element.style.minHeight = item.height + "px";
   element.style.zIndex = String(item.z);
   element.tabIndex = 0;
+  element.classList.toggle("is-canvas-minimized", item.windowState === "minimized");
 
-  const grip = document.createElement("div");
-  grip.className = "canvas-item-grip";
-  grip.textContent = "이동";
-  grip.title = "드래그해서 이동";
-  grip.addEventListener("pointerdown", (event) => startCanvasDrag(event, item, element));
+  if (item.type === "image") {
+    element.style.height = item.height + "px";
+  } else {
+    element.style.minHeight = item.height + "px";
+  }
 
+  const titlebar = createCanvasItemTitlebar(item, element);
   const resizeHandle = document.createElement("div");
   resizeHandle.className = "canvas-resize-handle";
   resizeHandle.title = "드래그해서 크기 변경";
@@ -1195,13 +1412,14 @@ function createCanvasElement(item) {
   element.addEventListener("contextmenu", (event) => showCanvasContextMenu(event, item.id));
 
   if (item.type === "image") {
-    element.append(grip, createCanvasImageBody(item), resizeHandle);
+    element.append(titlebar, createCanvasImageBody(item), resizeHandle);
   } else {
-    element.append(grip, createCanvasTextBody(item), resizeHandle);
+    element.append(titlebar, createCanvasTextBody(item), resizeHandle);
   }
 
   return element;
 }
+
 
 function createCanvasTextBody(item) {
   const body = document.createElement("div");
@@ -1274,6 +1492,7 @@ function startCanvasDrag(event, item, element) {
     window.removeEventListener("pointerup", handleUp);
     updateCanvasItem(item.id, { x: Math.round(nextX), y: Math.round(nextY), z: getNextZ() }, false);
     element.style.zIndex = String(zCounter);
+    resizeCanvasToContent(getActiveCanvasItems());
   }
 
   window.addEventListener("pointermove", handleMove);
@@ -1295,10 +1514,30 @@ function startCanvasResize(event, item, element) {
   const startHeight = item.height;
   const minWidth = item.type === "image" ? CANVAS_DEFAULTS.minImageWidth : CANVAS_DEFAULTS.minTextWidth;
   const minHeight = item.type === "image" ? CANVAS_DEFAULTS.minImageHeight : CANVAS_DEFAULTS.minTextHeight;
+  const aspectRatio = item.type === "image" ? getImageAspectRatio(item) : undefined;
   let nextWidth = startWidth;
   let nextHeight = startHeight;
 
   function handleMove(moveEvent) {
+    if (item.type === "image") {
+      const widthByX = clamp(startWidth + moveEvent.clientX - startX, minWidth, 900);
+      const heightByY = clamp(startHeight + moveEvent.clientY - startY, minHeight, 700);
+
+      if (Math.abs(moveEvent.clientY - startY) > Math.abs(moveEvent.clientX - startX)) {
+        nextHeight = heightByY;
+        nextWidth = clamp(Math.round(nextHeight * aspectRatio), minWidth, 900);
+        nextHeight = Math.round(nextWidth / aspectRatio);
+      } else {
+        nextWidth = widthByX;
+        nextHeight = clamp(Math.round(nextWidth / aspectRatio), minHeight, 700);
+        nextWidth = Math.round(nextHeight * aspectRatio);
+      }
+
+      element.style.width = nextWidth + "px";
+      element.style.height = nextHeight + "px";
+      return;
+    }
+
     nextWidth = clamp(startWidth + moveEvent.clientX - startX, minWidth, 1200);
     nextHeight = clamp(startHeight + moveEvent.clientY - startY, minHeight, 900);
     element.style.width = nextWidth + "px";
@@ -1308,18 +1547,22 @@ function startCanvasResize(event, item, element) {
   function handleUp() {
     window.removeEventListener("pointermove", handleMove);
     window.removeEventListener("pointerup", handleUp);
-    updateCanvasItem(item.id, { width: Math.round(nextWidth), height: Math.round(nextHeight) }, false);
+    updateCanvasItem(item.id, { width: Math.round(nextWidth), height: Math.round(nextHeight), aspectRatio }, false);
+    resizeCanvasToContent(getActiveCanvasItems());
   }
 
   window.addEventListener("pointermove", handleMove);
   window.addEventListener("pointerup", handleUp, { once: true });
 }
 
+
 function getCanvasPoint(event) {
   const rect = elements.memoCanvas.getBoundingClientRect();
+  const wrap = elements.memoCanvas.parentElement;
+
   return {
-    x: clamp(Math.round(event.clientX - rect.left + elements.memoCanvas.scrollLeft), 16, CANVAS_DEFAULTS.maxX),
-    y: clamp(Math.round(event.clientY - rect.top + elements.memoCanvas.scrollTop), 16, CANVAS_DEFAULTS.maxY)
+    x: clamp(Math.round(event.clientX - rect.left + (wrap?.scrollLeft || 0)), 16, CANVAS_DEFAULTS.maxX),
+    y: clamp(Math.round(event.clientY - rect.top + (wrap?.scrollTop || 0)), 16, CANVAS_DEFAULTS.maxY)
   };
 }
 
@@ -1363,6 +1606,17 @@ function handleCanvasContextAction(event) {
 
   if (action === "delete") {
     removeCanvasItem(item.id);
+    return;
+  }
+
+  if (action === "duplicate") {
+    duplicateCanvasItem(item.id);
+    return;
+  }
+
+  if (action === "hide") {
+    updateCanvasItem(item.id, { windowState: item.windowState === "minimized" ? "normal" : "minimized" }, true);
+    hideCanvasContextMenu();
     return;
   }
 
@@ -1487,6 +1741,7 @@ function sortNotes(noteList) {
 
 function renderList() {
   const query = elements.searchInput.value.trim().toLowerCase();
+  notes = notes.map(normalizeNote);
   const filtered = sortNotes(notes).filter((note) => getSearchText(note).includes(query));
 
   elements.noteList.innerHTML = "";
@@ -1532,15 +1787,19 @@ function renderEditor() {
   }
 
   activeId = activeNote.id;
-  elements.titleInput.value = activeNote.title;
-  elements.tagInput.value = activeNote.tags.join(", ");
-  elements.contentInput.value = activeNote.content;
-  updateEditorMeta(activeNote);
+  const normalizedNote = normalizeNote(activeNote);
+  if (normalizedNote !== activeNote) {
+    notes = notes.map((note) => note.id === normalizedNote.id ? normalizedNote : note);
+  }
+
+  elements.titleInput.value = normalizedNote.title;
+  elements.tagInput.value = normalizedNote.tags.join(", ");
+  elements.contentInput.value = normalizedNote.content;
+  updateEditorMeta(normalizedNote);
   renderImageBlocksForActiveNote();
-  elements.pinButton.classList.toggle("is-active", activeNote.pinned);
-  elements.pinButton.textContent = activeNote.pinned ? "고정됨" : "고정";
-  elements.focusButton.classList.toggle("is-active", isFocusMode);
-  elements.focusButton.textContent = isFocusMode ? "목록" : "집중";
+  elements.pinButton.classList.toggle("is-active", normalizedNote.pinned);
+  elements.pinButton.textContent = normalizedNote.pinned ? "고정됨" : "고정";
+  updateFocusModeControls();
 }
 
 function render() {
@@ -1642,11 +1901,11 @@ function updateActiveNote(patch, shouldSyncEditor = true) {
       return note;
     }
 
-    const nextNote = {
+    const nextNote = normalizeNote({
       ...note,
       ...patch,
       updatedAt: now
-    };
+    });
 
     updatedNote = nextNote;
     return nextNote;
@@ -1945,67 +2204,132 @@ async function addSelectedImages(event) {
   }
 }
 
-elements.newNoteButton.addEventListener("click", () => createNote());
-elements.searchInput.addEventListener("input", renderList);
-elements.titleInput.addEventListener("input", (event) => {
-  updateActiveNote({ title: event.target.value }, false);
-});
-elements.tagInput.addEventListener("input", (event) => {
-  updateActiveNote({ tags: parseTags(event.target.value) }, false);
-});
-elements.contentInput.addEventListener("input", (event) => {
-  updateActiveNote({ content: event.target.value }, false);
-});
-document.querySelectorAll("[data-action]").forEach((button) => {
-  button.addEventListener("click", () => applyFormat(button.dataset.action));
-});
-elements.templateSelect.addEventListener("change", (event) => insertTemplate(event.target.value));
-elements.addTextButton.addEventListener("click", () => addCanvasText(""));
-elements.importTextButton.addEventListener("click", requestTextFile);
-elements.textInput.addEventListener("change", importSelectedText);
-elements.addImageButton.addEventListener("click", requestImageFiles);
-elements.imageInput.addEventListener("change", addSelectedImages);
-elements.focusButton.addEventListener("click", () => {
-  isFocusMode = !isFocusMode;
-  elements.appShell.classList.toggle("is-focus-mode", isFocusMode);
-  renderEditor();
-  focusCanvasTextItem(getActiveTextItem()?.id);
-});
-elements.pinButton.addEventListener("click", () => {
-  const note = getActiveNote();
-  updateActiveNote({ pinned: !note.pinned });
-});
-elements.downloadButton.addEventListener("click", downloadActiveNote);
-elements.deleteButton.addEventListener("click", deleteActiveNote);
-elements.memoCanvas.addEventListener("dblclick", (event) => {
-  if (event.target === elements.memoCanvas) {
-    addCanvasText("", getCanvasPoint(event));
-  }
-});
-elements.memoCanvas.addEventListener("dragover", (event) => {
-  if ([...event.dataTransfer.items].some((item) => item.kind === "file")) {
-    event.preventDefault();
-  }
-});
-elements.memoCanvas.addEventListener("drop", (event) => {
-  const files = [...event.dataTransfer.files].filter((file) => file.type.startsWith("image/"));
+function handleAppError(error, fallbackStatus = "오류가 발생했습니다") {
+  console.error(error);
 
-  if (files.length === 0) {
+  if (elements.saveStatus) {
+    elements.saveStatus.textContent = fallbackStatus;
+  }
+}
+
+function bind(element, eventName, handler, fallbackStatus) {
+  if (!element) {
     return;
   }
 
-  event.preventDefault();
-  addDroppedImages(files, getCanvasPoint(event));
-});
-elements.canvasContextMenu.addEventListener("click", handleCanvasContextAction);
-document.addEventListener("click", (event) => {
-  if (!elements.canvasContextMenu.contains(event.target)) {
-    hideCanvasContextMenu();
-  }
-});
-window.addEventListener("beforeunload", () => unsubscribeNotes?.());
+  element.addEventListener(eventName, (event) => {
+    try {
+      handler(event);
+    } catch (error) {
+      handleAppError(error, fallbackStatus);
+    }
+  });
+}
 
-setupToolPanel();
-setupMiniApps();
-render();
-connectFirestore();
+function bindAll(selector, eventName, handler, fallbackStatus) {
+  document.querySelectorAll(selector).forEach((element) => {
+    bind(element, eventName, handler, fallbackStatus);
+  });
+}
+
+function closeAllMiniApps() {
+  document.querySelectorAll("[data-mini-window]").forEach((windowElement) => {
+    setMiniWindowVisibility(windowElement, "closed");
+  });
+  document.querySelectorAll(".app-icon").forEach((button) => button.classList.remove("is-selected"));
+}
+
+function updateFocusModeControls() {
+  elements.appShell.classList.toggle("is-focus-mode", isFocusMode);
+  elements.focusButton.classList.toggle("is-active", isFocusMode);
+  elements.focusButton.setAttribute("aria-pressed", String(isFocusMode));
+  elements.focusButton.textContent = isFocusMode ? "목록" : "집중";
+  requestAnimationFrame(() => resizeCanvasToContent());
+}
+
+function toggleFocusMode() {
+  isFocusMode = !isFocusMode;
+
+  if (isFocusMode) {
+    closeAllMiniApps();
+    setToolPanelMode("closed");
+  }
+
+  updateFocusModeControls();
+
+  try {
+    renderEditor();
+    focusCanvasTextItem(getActiveTextItem()?.id);
+  } catch (error) {
+    handleAppError(error, "집중 모드 전환 실패");
+  }
+}
+
+function initializeApp() {
+  initializeNotes();
+
+  bind(elements.newNoteButton, "click", () => createNote(), "새 메모 생성 실패");
+  bind(elements.searchInput, "input", renderList, "검색 실패");
+  bind(elements.titleInput, "input", (event) => {
+    updateActiveNote({ title: event.target.value }, false);
+  }, "제목 저장 실패");
+  bind(elements.tagInput, "input", (event) => {
+    updateActiveNote({ tags: parseTags(event.target.value) }, false);
+  }, "태그 저장 실패");
+  bind(elements.contentInput, "input", (event) => {
+    updateActiveNote({ content: event.target.value }, false);
+  }, "본문 저장 실패");
+  bindAll("[data-action]", "click", (event) => applyFormat(event.currentTarget.dataset.action), "서식 적용 실패");
+  bind(elements.templateSelect, "change", (event) => insertTemplate(event.target.value), "템플릿 삽입 실패");
+  bind(elements.addTextButton, "click", () => addCanvasText(""), "텍스트 추가 실패");
+  bind(elements.importTextButton, "click", requestTextFile, "텍스트 파일 선택 실패");
+  bind(elements.textInput, "change", importSelectedText, "텍스트 불러오기 실패");
+  bind(elements.addImageButton, "click", requestImageFiles, "이미지 선택 실패");
+  bind(elements.imageInput, "change", addSelectedImages, "이미지 추가 실패");
+  bind(elements.focusButton, "click", toggleFocusMode, "집중 모드 전환 실패");
+  bind(elements.pinButton, "click", () => {
+    const note = getActiveNote();
+    updateActiveNote({ pinned: !note.pinned });
+  }, "고정 상태 변경 실패");
+  bind(elements.downloadButton, "click", downloadActiveNote, "다운로드 실패");
+  bind(elements.deleteButton, "click", deleteActiveNote, "메모 삭제 실패");
+  bind(elements.memoCanvas, "dblclick", (event) => {
+    if (event.target === elements.memoCanvas) {
+      addCanvasText("", getCanvasPoint(event));
+    }
+  }, "텍스트 추가 실패");
+  bind(elements.memoCanvas, "dragover", (event) => {
+    if ([...event.dataTransfer.items].some((item) => item.kind === "file")) {
+      event.preventDefault();
+    }
+  }, "드래그 처리 실패");
+  bind(elements.memoCanvas, "drop", (event) => {
+    const files = [...event.dataTransfer.files].filter((file) => file.type.startsWith("image/"));
+
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    addDroppedImages(files, getCanvasPoint(event));
+  }, "이미지 추가 실패");
+  bind(elements.canvasContextMenu, "click", handleCanvasContextAction, "메뉴 실행 실패");
+  bind(document, "click", (event) => {
+    if (!elements.canvasContextMenu.contains(event.target)) {
+      hideCanvasContextMenu();
+    }
+  });
+  bind(window, "resize", () => resizeCanvasToContent());
+  bind(window, "beforeunload", () => unsubscribeNotes?.());
+
+  setupToolPanel();
+  setupMiniApps();
+  render();
+  connectFirestore();
+}
+
+try {
+  initializeApp();
+} catch (error) {
+  handleAppError(error, "앱 초기화 실패");
+}

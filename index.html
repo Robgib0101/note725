@@ -45,7 +45,7 @@
   }
 }</script>
 </head>
-<body>
+<body class="app-page">
   <a class="skip-link" href="#appShell">메모장으로 건너뛰기</a>
   <header class="site-header">
     <a class="site-brand" href="index.html" aria-label="Really Notepad 홈">Really Notepad</a>
@@ -140,12 +140,14 @@
             <div class="context-menu-group">
               <button type="button" data-context-action="front">앞으로</button>
               <button type="button" data-context-action="back">뒤로</button>
+              <button type="button" data-context-action="hide">숨기기/보이기</button>
+              <button type="button" data-context-action="duplicate">복제</button>
               <button type="button" data-context-action="delete">삭제</button>
             </div>
           </div>
         </section>
 
-        <section id="writingTools" class="writing-tools" aria-label="작성 도구" data-panel-state="docked">
+        <section id="writingTools" class="writing-tools" aria-label="작성 도구" data-panel-state="closed" hidden>
           <div class="tool-panel-titlebar" id="toolPanelTitlebar">
             <span class="tool-panel-title">작성 도구</span>
             <span class="tool-panel-hint">드래그</span>
@@ -367,10 +369,10 @@
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js?v=tool-panel-1", { scope: "./" }).catch(() => {});
+        navigator.serviceWorker.register("sw.js?v=launcher-toggle-v12", { scope: "./" }).catch(() => {});
       });
     }
   </script>
-  <script type="module" src="main.js?v=tool-panel-1"></script>
+  <script type="module" src="main.js?v=launcher-toggle-v12"></script>
 </body>
 </html>
