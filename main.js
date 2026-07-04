@@ -23,6 +23,9 @@ let notesStore;
 let unsubscribeNotes;
 let activeCanvasItemId;
 let contextMenuItemId;
+let contextMenuPoint;
+let canvasClipboard;
+let canvasToastTimer;
 let zCounter = 20;
 let miniWindowZ = 90;
 let toolPanelMode = "closed";
@@ -111,6 +114,23 @@ function getCanvasItemFallbackTitle(item) {
   return item.text.trim().startsWith("메모") ? "메모" : "텍스트";
 }
 
+function normalizeCanvasRestoreGeometry(value) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  return {
+    x: normalizeNumber(value.x, 56),
+    y: normalizeNumber(value.y, 56),
+    width: normalizeNumber(value.width, CANVAS_DEFAULTS.textWidth),
+    height: normalizeNumber(value.height, CANVAS_DEFAULTS.textHeight)
+  };
+}
+
+function normalizeCanvasWindowState(value) {
+  return ["normal", "minimized", "maximized"].includes(value) ? value : "normal";
+}
+
 function normalizeCanvasItem(item, index = 0) {
   const type = item?.type === "image" ? "image" : "text";
   const minWidth = type === "image" ? CANVAS_DEFAULTS.minImageWidth : CANVAS_DEFAULTS.minTextWidth;
@@ -134,7 +154,9 @@ function normalizeCanvasItem(item, index = 0) {
     y: clamp(normalizeNumber(item?.y, 56 + index * 28), 0, CANVAS_DEFAULTS.maxY),
     width: clamp(normalizeNumber(item?.width, fallbackWidth), minWidth, 1200),
     height: clamp(normalizeNumber(item?.height, fallbackHeight), minHeight, 900),
-    windowState: item?.windowState === "minimized" ? "minimized" : "normal",
+    windowState: normalizeCanvasWindowState(item?.windowState),
+    restoreGeometry: normalizeCanvasRestoreGeometry(item?.restoreGeometry),
+    locked: Boolean(item?.locked),
     z: normalizeNumber(item?.z, index + 1)
   };
 }
@@ -208,6 +230,7 @@ function normalizeNote(note = {}) {
     tags: Array.isArray(note.tags) ? note.tags.filter(Boolean).map(String) : [],
     images: Array.isArray(note.images) ? note.images : [],
     canvasItems: Array.isArray(note.canvasItems) ? note.canvasItems : [],
+    emptyCanvas: Boolean(note.emptyCanvas),
     pinned: Boolean(note.pinned),
     createdAt: normalizeNumber(note.createdAt, now),
     updatedAt: normalizeNumber(note.updatedAt, now)
@@ -241,7 +264,7 @@ function getCanvasItems(note) {
     return [];
   }
 
-  if (Array.isArray(note.canvasItems) && note.canvasItems.length > 0) {
+  if (Array.isArray(note.canvasItems) && (note.canvasItems.length > 0 || note.emptyCanvas)) {
     return note.canvasItems.map(normalizeCanvasItem);
   }
 
@@ -262,10 +285,11 @@ function getCanvasItems(note) {
 function ensureCanvasItems(note) {
   const items = getCanvasItems(note);
 
-  if (!Array.isArray(note.canvasItems) || note.canvasItems.length === 0) {
+  if (!Array.isArray(note.canvasItems) || (!note.emptyCanvas && note.canvasItems.length === 0)) {
     note.canvasItems = items;
     note.content = deriveContentFromCanvasItems(items);
     note.images = deriveImagesFromCanvasItems(items);
+    note.emptyCanvas = items.length === 0;
   }
 
   zCounter = Math.max(zCounter, ...items.map((item) => item.z ?? 0), 20);
@@ -292,6 +316,9 @@ function deriveImagesFromCanvasItems(items) {
       width: Math.round(item.width),
       height: Math.round(item.height),
       aspectRatio: item.aspectRatio,
+      restoreGeometry: item.restoreGeometry,
+      windowState: item.windowState,
+      locked: item.locked,
       x: Math.round(item.x),
       y: Math.round(item.y),
       caption: item.caption,
@@ -305,6 +332,7 @@ function buildCanvasPatch(items) {
 
   return {
     canvasItems: normalizedItems,
+    emptyCanvas: normalizedItems.length === 0,
     content: deriveContentFromCanvasItems(normalizedItems),
     images: deriveImagesFromCanvasItems(normalizedItems)
   };
@@ -327,17 +355,40 @@ function updateCanvasItem(itemId, patch, shouldRender = false) {
   syncCanvasItems(items, shouldRender);
 }
 
-function removeCanvasItem(itemId) {
+function restoreCanvasItem(item, index = 0) {
   const activeNote = getActiveNote();
-  const items = ensureCanvasItems(activeNote).filter((item) => item.id !== itemId);
-  const nextItems = items.length ? items : [createTextCanvasItem("")];
+  const items = ensureCanvasItems(activeNote).filter((canvasItem) => canvasItem.id !== item.id);
+  const nextItems = [...items];
+  nextItems.splice(clamp(index, 0, nextItems.length), 0, normalizeCanvasItem(item));
+  activeCanvasItemId = item.id;
+  syncCanvasItems(nextItems, true);
+}
+
+function removeCanvasItem(itemId, options = {}) {
+  const activeNote = getActiveNote();
+  const items = ensureCanvasItems(activeNote);
+  const removedIndex = items.findIndex((item) => item.id === itemId);
+
+  if (removedIndex < 0) {
+    return;
+  }
+
+  const removedItem = items[removedIndex];
+  const nextItems = items.filter((item) => item.id !== itemId);
 
   if (activeCanvasItemId === itemId) {
     activeCanvasItemId = nextItems[0]?.id;
   }
 
   hideCanvasContextMenu();
+  hideCanvasCloseMenu();
   syncCanvasItems(nextItems, true);
+
+  if (options.undo) {
+    showCanvasToast("박스를 삭제했습니다", [
+      { label: "되돌리기", action: () => restoreCanvasItem(removedItem, removedIndex) }
+    ]);
+  }
 }
 
 function duplicateCanvasItem(itemId) {
@@ -736,47 +787,49 @@ function toggleCanvasMinimize(item, element, button) {
   updateCanvasItem(item.id, { windowState: minimized ? "minimized" : "normal" }, false);
 }
 
-function restoreCanvasMaximize(element, button) {
-  const restore = JSON.parse(element.dataset.restoreGeometry || "{}");
-  element.classList.remove("is-canvas-maximized");
+function restoreCanvasMaximize(item) {
+  const restore = item.restoreGeometry;
 
-  if (restore.left) {
-    element.style.left = restore.left;
-    element.style.top = restore.top;
-    element.style.width = restore.width;
-    element.style.minHeight = restore.minHeight;
+  if (!restore) {
+    updateCanvasItem(item.id, { windowState: "normal", restoreGeometry: undefined }, true);
+    return;
   }
 
-  button.textContent = "□";
-  button.title = "최대화";
-  button.setAttribute("aria-label", "최대화");
-  delete element.dataset.restoreGeometry;
+  updateCanvasItem(item.id, {
+    x: restore.x,
+    y: restore.y,
+    width: restore.width,
+    height: restore.height,
+    windowState: "normal",
+    restoreGeometry: undefined,
+    z: getNextZ()
+  }, true);
 }
 
-function toggleCanvasMaximize(item, element, button) {
-  if (element.classList.contains("is-canvas-maximized")) {
-    restoreCanvasMaximize(element, button);
+function toggleCanvasMaximize(item) {
+  if (item.windowState === "maximized") {
+    restoreCanvasMaximize(item);
     return;
   }
 
   const wrap = elements.memoCanvas.parentElement;
-  element.dataset.restoreGeometry = JSON.stringify({
-    left: element.style.left,
-    top: element.style.top,
-    width: element.style.width,
-    minHeight: element.style.minHeight
-  });
+  const nextWidth = clamp((wrap?.clientWidth || 720) - 36, item.type === "image" ? 320 : 440, 1120);
+  const nextHeight = clamp((wrap?.clientHeight || 520) - 36, item.type === "image" ? 260 : 300, 820);
 
-  element.classList.remove("is-canvas-minimized");
-  element.classList.add("is-canvas-maximized");
-  element.style.left = wrap.scrollLeft + 18 + "px";
-  element.style.top = wrap.scrollTop + 18 + "px";
-  element.style.width = clamp(wrap.clientWidth - 36, item.type === "image" ? 320 : 440, 1120) + "px";
-  element.style.minHeight = clamp(wrap.clientHeight - 36, item.type === "image" ? 260 : 300, 820) + "px";
-  element.style.zIndex = String(getNextZ());
-  button.textContent = "❐";
-  button.title = "복원";
-  button.setAttribute("aria-label", "복원");
+  updateCanvasItem(item.id, {
+    x: (wrap?.scrollLeft || 0) + 18,
+    y: (wrap?.scrollTop || 0) + 18,
+    width: nextWidth,
+    height: nextHeight,
+    windowState: "maximized",
+    restoreGeometry: {
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height
+    },
+    z: getNextZ()
+  }, true);
 }
 
 function createCanvasItemTitlebar(item, element) {
@@ -809,7 +862,7 @@ function createCanvasItemTitlebar(item, element) {
 
   const hideButton = createCanvasWindowButton(
     "minimize",
-    item.windowState === "minimized" ? "보이기" : "숨기기",
+    item.windowState === "minimized" ? "펼치기" : "접기",
     item.windowState === "minimized" ? "+" : "−"
   );
   hideButton.addEventListener("click", (event) => {
@@ -818,21 +871,25 @@ function createCanvasItemTitlebar(item, element) {
     toggleCanvasMinimize(item, element, hideButton);
   });
 
-  const duplicateButton = createCanvasWindowButton("duplicate", "복제", "⧉");
-  duplicateButton.addEventListener("click", (event) => {
+  const maximizeButton = createCanvasWindowButton(
+    "maximize",
+    item.windowState === "maximized" ? "복원" : "최대화",
+    item.windowState === "maximized" ? "❐" : "□"
+  );
+  maximizeButton.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    duplicateCanvasItem(item.id);
+    toggleCanvasMaximize(item);
   });
 
-  const deleteButton = createCanvasWindowButton("close", "삭제", "×");
+  const deleteButton = createCanvasWindowButton("close", "닫기", "×");
   deleteButton.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    removeCanvasItem(item.id);
+    showCanvasCloseMenu(event, item.id);
   });
 
-  controls.append(hideButton, duplicateButton, deleteButton);
+  controls.append(hideButton, maximizeButton, deleteButton);
   grip.append(dragHandle, title, controls);
   grip.addEventListener("pointerdown", (event) => {
     if (event.target.closest("button, input")) {
@@ -1234,6 +1291,62 @@ function createMiniButton(label, action, className = "mini-command") {
   return button;
 }
 
+function createMiniGroupTitle(label) {
+  const title = document.createElement("span");
+  title.className = "mini-settings-title";
+  title.textContent = label;
+  return title;
+}
+
+function getSettingsStatusText() {
+  const note = getActiveNote();
+  const items = getCanvasItems(note);
+  const hiddenCount = items.filter((item) => item.windowState === "minimized").length;
+  const storageLabel = notesStore?.enabled ? "Firebase 연결" : "로컬 저장";
+  return storageLabel + " · 메모 " + notes.length + "개 · 박스 " + items.length + "개 · 숨김 " + hiddenCount + "개";
+}
+
+function clearActiveNoteContent() {
+  const note = getActiveNote();
+
+  if (!note) {
+    return;
+  }
+
+  activeCanvasItemId = undefined;
+  updateActiveNote({
+    title: "",
+    content: "",
+    tags: [],
+    images: [],
+    canvasItems: [],
+    emptyCanvas: true
+  });
+  elements.saveStatus.textContent = "메모를 비웠습니다";
+}
+
+function showAllCanvasItems() {
+  const items = getActiveCanvasItems().map((item) => ({
+    ...item,
+    windowState: item.windowState === "minimized" ? "normal" : item.windowState
+  }));
+  syncCanvasItems(items, true);
+}
+
+function arrangeCanvasItems() {
+  const items = getActiveCanvasItems().map((item, index) => normalizeCanvasItem({
+    ...item,
+    x: 40 + (index % 2) * 34,
+    y: 40 + index * 34,
+    windowState: item.windowState === "minimized" ? "normal" : item.windowState,
+    z: index + 1
+  }));
+
+  zCounter = Math.max(20, items.length + 1);
+  syncCanvasItems(items, true);
+  resizeCanvasToContent(items);
+}
+
 function renderMiniApp(appId, body) {
   body.innerHTML = "";
 
@@ -1245,8 +1358,7 @@ function renderMiniApp(appId, body) {
       createMiniButton("이미지 추가", requestImageFiles),
       createMiniButton("TXT 불러오기", requestTextFile),
       createMiniButton("날짜 삽입", () => applyFormat("date")),
-      createMiniButton("다운로드", downloadActiveNote),
-      createMiniButton(isFocusMode ? "목록 보기" : "집중 모드", () => elements.focusButton.click())
+      createMiniButton("메모 다운로드", downloadActiveNote)
     );
     body.append(grid);
     return;
@@ -1334,17 +1446,46 @@ function renderMiniApp(appId, body) {
 
   if (appId === "settings") {
     const note = getActiveNote();
-    const list = document.createElement("div");
-    list.className = "mini-command-list";
-    list.append(
-      createMiniButton(note?.pinned ? "고정 해제" : "메모 고정", () => elements.pinButton.click()),
-      createMiniButton(isFocusMode ? "목록 표시" : "집중 모드", () => elements.focusButton.click()),
-      createMiniButton("로컬 저장 상태 확인", () => {
-        elements.saveStatus.textContent = notesStore?.enabled ? "Firebase 연결됨" : "로컬 저장 사용 중";
+    const summary = document.createElement("p");
+    summary.className = "mini-window-note";
+    summary.textContent = getSettingsStatusText();
+
+    const noteGroup = document.createElement("div");
+    noteGroup.className = "mini-settings-group";
+    noteGroup.append(createMiniGroupTitle("현재 메모"));
+    noteGroup.append(
+      createMiniButton(note?.pinned ? "고정 해제" : "메모 고정", () => {
+        elements.pinButton.click();
+        renderMiniApp(appId, body);
       }),
+      createMiniButton("새 메모", () => createNote()),
+      createMiniButton("메모 다운로드", downloadActiveNote),
+      createMiniButton("메모 비우기", () => clearActiveNoteContent())
+    );
+
+    const canvasGroup = document.createElement("div");
+    canvasGroup.className = "mini-settings-group";
+    canvasGroup.append(createMiniGroupTitle("캔버스"));
+    canvasGroup.append(
+      createMiniButton("숨긴 박스 모두 표시", showAllCanvasItems),
+      createMiniButton("박스 정렬", arrangeCanvasItems),
+      createMiniButton("캔버스 크기 맞춤", () => resizeCanvasToContent(getActiveCanvasItems()))
+    );
+
+    const appGroup = document.createElement("div");
+    appGroup.className = "mini-settings-group";
+    appGroup.append(createMiniGroupTitle("앱 상태"));
+    appGroup.append(
+      createMiniButton("저장 상태 갱신", () => {
+        summary.textContent = getSettingsStatusText();
+        elements.saveStatus.textContent = notesStore?.enabled ? "Firebase 저장됨" : "로컬 저장됨";
+      }),
+      createMiniButton("도구 패널 닫기", () => setToolPanelMode("closed")),
       createMiniButton("화면 새로고침", () => window.location.reload())
     );
-    body.append(list);
+
+    body.append(summary, noteGroup, canvasGroup, appGroup);
+    return;
   }
 }
 
@@ -1389,18 +1530,15 @@ function createCanvasElement(item) {
   element.className = "canvas-item canvas-item--" + item.type + " canvas-theme--" + item.theme + " canvas-crop--" + item.crop;
   element.dataset.itemId = item.id;
   element.dataset.itemType = item.type;
+  element.classList.toggle("is-canvas-locked", item.locked);
   element.style.left = item.x + "px";
   element.style.top = item.y + "px";
   element.style.width = item.width + "px";
   element.style.zIndex = String(item.z);
   element.tabIndex = 0;
   element.classList.toggle("is-canvas-minimized", item.windowState === "minimized");
-
-  if (item.type === "image") {
-    element.style.height = item.height + "px";
-  } else {
-    element.style.minHeight = item.height + "px";
-  }
+  element.classList.toggle("is-canvas-maximized", item.windowState === "maximized");
+  element.style.height = item.height + "px";
 
   const titlebar = createCanvasItemTitlebar(item, element);
   const resizeHandle = document.createElement("div");
@@ -1464,6 +1602,11 @@ function createCanvasImageBody(item) {
 
 function startCanvasDrag(event, item, element) {
   if (element.classList.contains("is-canvas-maximized")) {
+    return;
+  }
+
+  if (item.locked) {
+    showCanvasToast("위치가 고정된 박스입니다");
     return;
   }
 
@@ -1541,7 +1684,7 @@ function startCanvasResize(event, item, element) {
     nextWidth = clamp(startWidth + moveEvent.clientX - startX, minWidth, 1200);
     nextHeight = clamp(startHeight + moveEvent.clientY - startY, minHeight, 900);
     element.style.width = nextWidth + "px";
-    element.style.minHeight = nextHeight + "px";
+    element.style.height = nextHeight + "px";
   }
 
   function handleUp() {
@@ -1566,33 +1709,403 @@ function getCanvasPoint(event) {
   };
 }
 
+function createContextButton(label, action, options = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.contextAction = action;
+
+  if (options.value !== undefined) {
+    button.dataset.contextValue = String(options.value);
+  }
+
+  if (options.danger) {
+    button.classList.add("is-danger");
+  }
+
+  if (options.disabled) {
+    button.disabled = true;
+  }
+
+  button.textContent = label;
+  return button;
+}
+
+function createContextSeparator() {
+  const separator = document.createElement("div");
+  separator.className = "context-menu-separator";
+  return separator;
+}
+
+function createContextMenuGroup(label, buttons) {
+  const group = document.createElement("section");
+  group.className = "context-menu-group";
+
+  const title = document.createElement("span");
+  title.textContent = label;
+
+  const actions = document.createElement("div");
+  actions.className = "context-menu-actions";
+  buttons.forEach((button) => actions.append(button));
+  group.append(title, actions);
+  return group;
+}
+
+function createContextSubmenu(label, buttons) {
+  const submenu = document.createElement("section");
+  submenu.className = "context-submenu";
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "context-submenu-trigger";
+  trigger.innerHTML = "<span>" + label + "</span><span aria-hidden=\"true\">›</span>";
+
+  const panel = document.createElement("div");
+  panel.className = "context-submenu-panel";
+  buttons.forEach((button) => panel.append(button));
+
+  submenu.append(trigger, panel);
+  return submenu;
+}
+
+function renderCanvasContextMenu(item) {
+  const menu = elements.canvasContextMenu;
+  menu.innerHTML = "";
+  menu.append(
+    createContextMenuGroup("편집", [
+      createContextButton("이름 변경", "edit-title"),
+      createContextButton("복제", "duplicate"),
+      createContextButton("복사", "copy"),
+      createContextButton("잘라내기", "cut"),
+      createContextButton("붙여넣기", "paste", { disabled: !canvasClipboard })
+    ]),
+    createContextSeparator(),
+    createContextSubmenu("배치", [
+      createContextButton("앞으로", "raise"),
+      createContextButton("뒤로", "back"),
+      createContextButton("맨 앞으로", "front"),
+      createContextButton("맨 뒤로", "send-back"),
+      createContextButton("왼쪽 정렬", "align-left"),
+      createContextButton("위쪽 정렬", "align-top"),
+      createContextButton("가운데 정렬", "align-center"),
+      createContextButton("격자 정렬", "arrange-all")
+    ]),
+    createContextSubmenu("크기", [
+      createContextButton(item.windowState === "maximized" ? "복원" : "최대화", "maximize"),
+      createContextButton("기본 크기", "reset-size"),
+      createContextButton("작게", "scale", { value: "0.9" }),
+      createContextButton("크게", "scale", { value: "1.1" }),
+      createContextButton("내용에 맞추기", "fit-content")
+    ]),
+    createContextSubmenu("스타일", [
+      createContextButton("기본", "theme", { value: "plain" }),
+      createContextButton("종이", "theme", { value: "paper" }),
+      createContextButton("마커", "theme", { value: "marker" }),
+      createContextButton("다크", "theme", { value: "dark" }),
+      createContextButton("원본 이미지", "crop", { value: "original", disabled: item.type !== "image" }),
+      createContextButton("정사각", "crop", { value: "square", disabled: item.type !== "image" }),
+      createContextButton("와이드", "crop", { value: "wide", disabled: item.type !== "image" }),
+      createContextButton("원형", "crop", { value: "circle", disabled: item.type !== "image" })
+    ]),
+    createContextSeparator(),
+    createContextMenuGroup("관리", [
+      createContextButton(item.locked ? "위치 고정 해제" : "위치 고정", "toggle-lock"),
+      createContextButton(item.windowState === "minimized" ? "보이기" : "숨기기", "hide"),
+      createContextButton("상세 정보", "details")
+    ]),
+    createContextSeparator(),
+    createContextMenuGroup("삭제", [
+      createContextButton("삭제", "delete", { danger: true })
+    ])
+  );
+}
+
+function positionCanvasContextMenu(event, menu) {
+  const gap = 10;
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  menu.hidden = false;
+  menu.style.visibility = "hidden";
+
+  const rect = menu.getBoundingClientRect();
+  let left = event.clientX + gap;
+  let top = event.clientY + gap;
+
+  if (left + rect.width + 8 > window.innerWidth) {
+    left = event.clientX - rect.width - gap;
+  }
+
+  if (top + rect.height + 8 > window.innerHeight) {
+    top = event.clientY - rect.height - gap;
+  }
+
+  menu.style.left = clamp(left, 8, Math.max(8, window.innerWidth - rect.width - 8)) + "px";
+  menu.style.top = clamp(top, 8, Math.max(8, window.innerHeight - rect.height - 8)) + "px";
+  menu.classList.toggle("opens-left", left + rect.width + 240 > window.innerWidth);
+  menu.style.visibility = "visible";
+}
+
 function showCanvasContextMenu(event, itemId) {
   event.preventDefault();
+  event.stopPropagation();
+  hideCanvasCloseMenu();
   contextMenuItemId = itemId;
+  contextMenuPoint = getCanvasPoint(event);
   activateCanvasItem(itemId);
 
   const item = getActiveCanvasItems().find((canvasItem) => canvasItem.id === itemId);
-  const menu = elements.canvasContextMenu;
-  const cropGroup = menu.querySelector('[data-context-group="crop"]');
-  cropGroup.hidden = item?.type !== "image";
 
-  menu.hidden = false;
-  const menuRect = menu.getBoundingClientRect();
-  menu.style.left = clamp(event.clientX, 8, window.innerWidth - menuRect.width - 8) + "px";
-  menu.style.top = clamp(event.clientY, 8, window.innerHeight - menuRect.height - 8) + "px";
+  if (!item) {
+    hideCanvasContextMenu();
+    return;
+  }
+
+  renderCanvasContextMenu(item);
+  positionCanvasContextMenu(event, elements.canvasContextMenu);
 }
 
 function hideCanvasContextMenu() {
   elements.canvasContextMenu.hidden = true;
+  elements.canvasContextMenu.innerHTML = "";
+  elements.canvasContextMenu.classList.remove("opens-left");
   contextMenuItemId = undefined;
+  contextMenuPoint = undefined;
+}
+
+function getCanvasItemDefaultSize(item) {
+  if (item.type === "image") {
+    const aspectRatio = getImageAspectRatio(item);
+    const width = CANVAS_DEFAULTS.imageWidth;
+    return {
+      width,
+      height: Math.round(width / aspectRatio),
+      aspectRatio
+    };
+  }
+
+  return {
+    width: CANVAS_DEFAULTS.textWidth,
+    height: CANVAS_DEFAULTS.textHeight
+  };
+}
+
+function getScaledCanvasItemSize(item, scale) {
+  const minWidth = item.type === "image" ? CANVAS_DEFAULTS.minImageWidth : CANVAS_DEFAULTS.minTextWidth;
+  const minHeight = item.type === "image" ? CANVAS_DEFAULTS.minImageHeight : CANVAS_DEFAULTS.minTextHeight;
+  let width = clamp(Math.round(item.width * scale), minWidth, item.type === "image" ? 900 : 1200);
+  let height = clamp(Math.round(item.height * scale), minHeight, item.type === "image" ? 700 : 900);
+
+  if (item.type === "image") {
+    const aspectRatio = getImageAspectRatio(item);
+    height = Math.round(width / aspectRatio);
+
+    if (height < minHeight) {
+      height = minHeight;
+      width = Math.round(height * aspectRatio);
+    }
+  }
+
+  return { width, height };
+}
+
+function getCanvasItemFitSize(item) {
+  if (item.type === "image") {
+    return getCanvasItemDefaultSize(item);
+  }
+
+  const element = elements.memoCanvas.querySelector('[data-item-id="' + CSS.escape(item.id) + '"]');
+  const body = element?.querySelector(".canvas-text-content");
+  const width = clamp(item.width, CANVAS_DEFAULTS.minTextWidth, 900);
+  const height = clamp((body?.scrollHeight || item.height - 30) + 42, CANVAS_DEFAULTS.minTextHeight, 720);
+  return { width, height };
+}
+
+function focusCanvasItemTitle(itemId) {
+  requestAnimationFrame(() => {
+    const input = elements.memoCanvas.querySelector('[data-item-id="' + CSS.escape(itemId) + '"] .canvas-title-input');
+    input?.focus();
+    input?.select();
+  });
+}
+
+function focusCanvasItemBody(item) {
+  requestAnimationFrame(() => {
+    const selector = item.type === "image" ? ".canvas-image-caption" : ".canvas-text-content";
+    const target = elements.memoCanvas.querySelector('[data-item-id="' + CSS.escape(item.id) + '"] ' + selector);
+    target?.focus();
+  });
+}
+
+function copyCanvasItem(item, shouldCut = false) {
+  canvasClipboard = normalizeCanvasItem({
+    ...item,
+    windowState: "normal",
+    restoreGeometry: undefined,
+    z: getNextZ()
+  });
+
+  const clipboardText = item.type === "text" ? item.text : item.caption || item.title;
+  if (clipboardText && navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(clipboardText).catch(() => {});
+  }
+
+  if (shouldCut) {
+    removeCanvasItem(item.id);
+    showCanvasToast("박스를 잘라냈습니다", [
+      { label: "붙여넣기", action: () => pasteCanvasClipboard() }
+    ]);
+  } else {
+    showCanvasToast("박스를 복사했습니다");
+  }
+}
+
+function pasteCanvasClipboard() {
+  if (!canvasClipboard) {
+    return;
+  }
+
+  const activeNote = getActiveNote();
+  const items = ensureCanvasItems(activeNote);
+  const item = normalizeCanvasItem({
+    ...canvasClipboard,
+    id: createId(),
+    x: clamp(contextMenuPoint?.x ?? canvasClipboard.x + 28, 0, CANVAS_DEFAULTS.maxX),
+    y: clamp(contextMenuPoint?.y ?? canvasClipboard.y + 28, 0, CANVAS_DEFAULTS.maxY),
+    windowState: "normal",
+    z: getNextZ()
+  });
+
+  activeCanvasItemId = item.id;
+  syncCanvasItems([...items, item], true);
+}
+
+function showCanvasItemDetails(item) {
+  const typeLabel = item.type === "image" ? "이미지" : "텍스트";
+  const stateLabel = item.windowState === "minimized" ? "숨김" : item.windowState === "maximized" ? "최대화" : "표시";
+  const lockLabel = item.locked ? "고정" : "이동 가능";
+  showCanvasToast(typeLabel + " · " + Math.round(item.width) + "×" + Math.round(item.height) + " · x " + Math.round(item.x) + ", y " + Math.round(item.y) + " · " + stateLabel + " · " + lockLabel);
+}
+
+function getCanvasCloseMenu() {
+  let menu = document.querySelector("[data-canvas-close-menu]");
+
+  if (!menu) {
+    menu = document.createElement("div");
+    menu.className = "canvas-close-menu";
+    menu.dataset.canvasCloseMenu = "true";
+    document.body.append(menu);
+  }
+
+  return menu;
+}
+
+function hideCanvasCloseMenu() {
+  const menu = document.querySelector("[data-canvas-close-menu]");
+
+  if (menu) {
+    menu.hidden = true;
+    menu.innerHTML = "";
+  }
+}
+
+function showCanvasCloseMenu(event, itemId) {
+  hideCanvasContextMenu();
+  const item = getActiveCanvasItems().find((canvasItem) => canvasItem.id === itemId);
+
+  if (!item) {
+    return;
+  }
+
+  const menu = getCanvasCloseMenu();
+  menu.innerHTML = "";
+
+  const title = document.createElement("span");
+  title.textContent = "박스 닫기";
+
+  const hideButton = createContextButton(item.windowState === "minimized" ? "보이기" : "숨기기", "close-hide");
+  const deleteButton = createContextButton("삭제", "close-delete", { danger: true });
+  const cancelButton = createContextButton("취소", "close-cancel");
+
+  menu.append(title, hideButton, deleteButton, cancelButton);
+  menu.hidden = false;
+  menu.dataset.itemId = itemId;
+
+  const rect = menu.getBoundingClientRect();
+  const left = clamp(event.clientX - rect.width + 12, 8, Math.max(8, window.innerWidth - rect.width - 8));
+  const top = clamp(event.clientY + 8, 8, Math.max(8, window.innerHeight - rect.height - 8));
+  menu.style.left = left + "px";
+  menu.style.top = top + "px";
+}
+
+function handleCanvasCloseMenuAction(event) {
+  const menu = event.target.closest("[data-canvas-close-menu]");
+  const button = event.target.closest("[data-context-action]");
+
+  if (!menu || !button) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const itemId = menu.dataset.itemId;
+  const item = getActiveCanvasItems().find((canvasItem) => canvasItem.id === itemId);
+
+  if (!item) {
+    hideCanvasCloseMenu();
+    return;
+  }
+
+  if (button.dataset.contextAction === "close-hide") {
+    updateCanvasItem(item.id, { windowState: item.windowState === "minimized" ? "normal" : "minimized" }, true);
+  } else if (button.dataset.contextAction === "close-delete") {
+    removeCanvasItem(item.id, { undo: true });
+  }
+
+  hideCanvasCloseMenu();
+}
+
+function showCanvasToast(message, actions = []) {
+  let toast = document.querySelector("[data-canvas-toast]");
+
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.className = "canvas-undo-toast";
+    toast.dataset.canvasToast = "true";
+    document.body.append(toast);
+  }
+
+  toast.innerHTML = "";
+  const text = document.createElement("span");
+  text.textContent = message;
+  toast.append(text);
+
+  actions.forEach(({ label, action }) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      action();
+      toast.hidden = true;
+    });
+    toast.append(button);
+  });
+
+  toast.hidden = false;
+  clearTimeout(canvasToastTimer);
+  canvasToastTimer = setTimeout(() => {
+    toast.hidden = true;
+  }, actions.length ? 7000 : 3600);
 }
 
 function handleCanvasContextAction(event) {
   const button = event.target.closest("[data-context-action]");
 
-  if (!button || !contextMenuItemId) {
+  if (!button || !contextMenuItemId || button.disabled) {
     return;
   }
+
+  event.preventDefault();
+  event.stopPropagation();
 
   const action = button.dataset.contextAction;
   const value = button.dataset.contextValue;
@@ -1605,28 +2118,65 @@ function handleCanvasContextAction(event) {
   }
 
   if (action === "delete") {
-    removeCanvasItem(item.id);
+    removeCanvasItem(item.id, { undo: true });
     return;
   }
 
-  if (action === "duplicate") {
-    duplicateCanvasItem(item.id);
-    return;
-  }
-
-  if (action === "hide") {
-    updateCanvasItem(item.id, { windowState: item.windowState === "minimized" ? "normal" : "minimized" }, true);
+  if (action === "edit-title") {
     hideCanvasContextMenu();
+    focusCanvasItemTitle(item.id);
     return;
   }
 
-  if (action === "theme") {
+  if (action === "edit-body") {
+    hideCanvasContextMenu();
+    focusCanvasItemBody(item);
+    return;
+  }
+
+  if (action === "copy") {
+    copyCanvasItem(item);
+  } else if (action === "cut") {
+    copyCanvasItem(item, true);
+  } else if (action === "paste") {
+    pasteCanvasClipboard();
+  } else if (action === "duplicate") {
+    duplicateCanvasItem(item.id);
+  } else if (action === "hide") {
+    updateCanvasItem(item.id, { windowState: item.windowState === "minimized" ? "normal" : "minimized" }, true);
+  } else if (action === "toggle-lock") {
+    updateCanvasItem(item.id, { locked: !item.locked }, true);
+  } else if (action === "details") {
+    showCanvasItemDetails(item);
+  } else if (action === "maximize") {
+    toggleCanvasMaximize(item);
+  } else if (action === "reset-size") {
+    updateCanvasItem(item.id, { ...getCanvasItemDefaultSize(item), windowState: "normal", restoreGeometry: undefined }, true);
+  } else if (action === "fit-content") {
+    updateCanvasItem(item.id, { ...getCanvasItemFitSize(item), windowState: "normal" }, true);
+  } else if (action === "scale") {
+    updateCanvasItem(item.id, { ...getScaledCanvasItemSize(item, Number(value) || 1), windowState: "normal" }, true);
+  } else if (action === "align-left") {
+    updateCanvasItem(item.id, { x: 32, windowState: "normal", z: getNextZ() }, true);
+  } else if (action === "align-top") {
+    updateCanvasItem(item.id, { y: 32, windowState: "normal", z: getNextZ() }, true);
+  } else if (action === "align-center") {
+    const viewport = getCanvasViewportSize();
+    updateCanvasItem(item.id, { x: Math.max(0, Math.round((viewport.width - item.width) / 2)), windowState: "normal", z: getNextZ() }, true);
+  } else if (action === "arrange-all") {
+    arrangeCanvasItems();
+  } else if (action === "theme") {
     updateCanvasItem(item.id, { theme: value }, true);
   } else if (action === "crop") {
     updateCanvasItem(item.id, { crop: value }, true);
   } else if (action === "front") {
     updateCanvasItem(item.id, { z: getNextZ() }, true);
+  } else if (action === "raise") {
+    const maxZ = Math.max(...items.map((canvasItem) => canvasItem.z || 1), 1);
+    updateCanvasItem(item.id, { z: Math.min(maxZ + 1, item.z + 1) }, true);
   } else if (action === "back") {
+    updateCanvasItem(item.id, { z: Math.max(1, item.z - 1) }, true);
+  } else if (action === "send-back") {
     updateCanvasItem(item.id, { z: 1 }, true);
   }
 
@@ -1799,7 +2349,6 @@ function renderEditor() {
   renderImageBlocksForActiveNote();
   elements.pinButton.classList.toggle("is-active", normalizedNote.pinned);
   elements.pinButton.textContent = normalizedNote.pinned ? "고정됨" : "고정";
-  updateFocusModeControls();
 }
 
 function render() {
@@ -2232,39 +2781,6 @@ function bindAll(selector, eventName, handler, fallbackStatus) {
   });
 }
 
-function closeAllMiniApps() {
-  document.querySelectorAll("[data-mini-window]").forEach((windowElement) => {
-    setMiniWindowVisibility(windowElement, "closed");
-  });
-  document.querySelectorAll(".app-icon").forEach((button) => button.classList.remove("is-selected"));
-}
-
-function updateFocusModeControls() {
-  elements.appShell.classList.toggle("is-focus-mode", isFocusMode);
-  elements.focusButton.classList.toggle("is-active", isFocusMode);
-  elements.focusButton.setAttribute("aria-pressed", String(isFocusMode));
-  elements.focusButton.textContent = isFocusMode ? "목록" : "집중";
-  requestAnimationFrame(() => resizeCanvasToContent());
-}
-
-function toggleFocusMode() {
-  isFocusMode = !isFocusMode;
-
-  if (isFocusMode) {
-    closeAllMiniApps();
-    setToolPanelMode("closed");
-  }
-
-  updateFocusModeControls();
-
-  try {
-    renderEditor();
-    focusCanvasTextItem(getActiveTextItem()?.id);
-  } catch (error) {
-    handleAppError(error, "집중 모드 전환 실패");
-  }
-}
-
 function initializeApp() {
   initializeNotes();
 
@@ -2286,7 +2802,6 @@ function initializeApp() {
   bind(elements.textInput, "change", importSelectedText, "텍스트 불러오기 실패");
   bind(elements.addImageButton, "click", requestImageFiles, "이미지 선택 실패");
   bind(elements.imageInput, "change", addSelectedImages, "이미지 추가 실패");
-  bind(elements.focusButton, "click", toggleFocusMode, "집중 모드 전환 실패");
   bind(elements.pinButton, "click", () => {
     const note = getActiveNote();
     updateActiveNote({ pinned: !note.pinned });
@@ -2315,10 +2830,17 @@ function initializeApp() {
   }, "이미지 추가 실패");
   bind(elements.canvasContextMenu, "click", handleCanvasContextAction, "메뉴 실행 실패");
   bind(document, "click", (event) => {
+    const closeMenu = document.querySelector("[data-canvas-close-menu]");
+
     if (!elements.canvasContextMenu.contains(event.target)) {
       hideCanvasContextMenu();
     }
+
+    if (closeMenu && !closeMenu.contains(event.target)) {
+      hideCanvasCloseMenu();
+    }
   });
+  bind(document, "click", handleCanvasCloseMenuAction, "닫기 메뉴 실행 실패");
   bind(window, "resize", () => resizeCanvasToContent());
   bind(window, "beforeunload", () => unsubscribeNotes?.());
 

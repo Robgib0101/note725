@@ -1,4 +1,4 @@
-const CACHE_NAME = "really-notepad-launcher-toggle-v12";
+const CACHE_NAME = "really-notepad-box-menu-v16";
 const BASE_PATH = new URL("./", self.location).pathname;
 
 const CORE_ASSETS = [

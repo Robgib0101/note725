@@ -12,7 +12,6 @@ export const elements = {
   readTime: document.querySelector("#readTime"),
   imageCount: document.querySelector("#imageCount"),
   checklistStatus: document.querySelector("#checklistStatus"),
-  focusButton: document.querySelector("#focusButton"),
   pinButton: document.querySelector("#pinButton"),
   downloadButton: document.querySelector("#downloadButton"),
   deleteButton: document.querySelector("#deleteButton"),
